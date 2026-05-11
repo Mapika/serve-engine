@@ -21,6 +21,10 @@ def _extract_bearer(authorization: str | None) -> str | None:
 def require_auth_dep(request: Request) -> api_keys.ApiKey | None:
     """FastAPI dependency. Returns the ApiKey on success, raises 401/429 on failure.
 
+    Auth sources, in order:
+      1. `Authorization: Bearer sk-...` header (preferred).
+      2. `?token=sk-...` query parameter (for EventSource etc.).
+
     If no keys exist in the table, auth is bypassed (returns None).
     """
     conn: sqlite3.Connection = request.app.state.conn
@@ -30,6 +34,11 @@ def require_auth_dep(request: Request) -> api_keys.ApiKey | None:
     auth_header = request.headers.get("authorization")
     secret = _extract_bearer(auth_header)
     if secret is None:
+        # Fallback: query param. Used by EventSource and similar APIs that
+        # cannot set request headers.
+        secret = request.query_params.get("token")
+
+    if not secret:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             detail="missing or malformed Authorization header (expected: Bearer sk-...)",

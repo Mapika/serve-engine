@@ -62,3 +62,22 @@ async def test_good_bearer_passes(app_factory):
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.post("/v1/test", headers={"Authorization": f"Bearer {secret}"})
     assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_query_param_token(app_factory):
+    """?token= must work as a fallback when no Authorization header is present."""
+    app, secret = app_factory(create_admin_key=True)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        r = await c.post(f"/v1/test?token={secret}")
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_query_param_invalid_token(app_factory):
+    app, _ = app_factory(create_admin_key=True)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        r = await c.post("/v1/test?token=sk-bogus")
+    assert r.status_code == 401

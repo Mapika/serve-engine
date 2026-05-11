@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { getToken } from '../api'
 
 type Event = { kind: string; payload: any; ts: string }
 
@@ -6,11 +7,13 @@ export default function Logs() {
   const [events, setEvents] = useState<Event[]>([])
 
   useEffect(() => {
-    // Note: EventSource does not support custom headers, so we cannot pass
-    // a Bearer token here. /admin/events is admin-gated; this view will only
-    // receive data when the api_keys table is empty (homelab bypass).
-    // A future task will introduce a token-in-query-param variant.
-    const es = new EventSource('/admin/events')
+    const token = getToken()
+    // EventSource cannot send custom headers. The daemon's auth dep
+    // accepts ?token= as a fallback for exactly this case.
+    const url = token
+      ? `/admin/events?token=${encodeURIComponent(token)}`
+      : '/admin/events'
+    const es = new EventSource(url)
     es.onmessage = (e: MessageEvent) => {
       try {
         const obj = JSON.parse(e.data) as Event
