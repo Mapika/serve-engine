@@ -8,4 +8,10 @@ app = typer.Typer(
     help="serve — single-node inference orchestrator",
 )
 
-from serve_engine.cli import pull_cmd  # noqa: F401,E402  registers command
+from serve_engine.cli import (  # noqa: E402
+    ls_cmd,  # noqa: F401  registers command
+    ps_cmd,  # noqa: F401  registers command
+    pull_cmd,  # noqa: F401  registers command
+    run_cmd,  # noqa: F401  registers command
+    stop_cmd,  # noqa: F401  registers command
+)
