@@ -39,6 +39,9 @@ class CreateDeploymentRequest(BaseModel):
     tensor_parallel: int | None = None
     max_model_len: int = 8192
     dtype: str = "auto"
+    pinned: bool = False
+    idle_timeout_s: int | None = None
+    target_concurrency: int = 8
 
 
 class CreateModelRequest(BaseModel):
@@ -77,6 +80,9 @@ async def create_deployment(
             tensor_parallel=tp,
             max_model_len=body.max_model_len,
             dtype=body.dtype,
+            pinned=body.pinned,
+            idle_timeout_s=body.idle_timeout_s,
+            target_concurrency=body.target_concurrency,
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
@@ -84,9 +90,20 @@ async def create_deployment(
     return {**asdict(dep), "gpu_ids": dep.gpu_ids}
 
 
-@router.delete("/deployments/current", status_code=status.HTTP_204_NO_CONTENT)
-async def stop_current(manager: LifecycleManager = Depends(get_manager)):
-    await manager.stop()
+@router.delete("/deployments/{dep_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def stop_deployment(
+    dep_id: int,
+    manager: LifecycleManager = Depends(get_manager),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    if dep_store.get_by_id(conn, dep_id) is None:
+        raise HTTPException(404, f"no deployment with id {dep_id}")
+    await manager.stop(dep_id)
+
+
+@router.delete("/deployments", status_code=status.HTTP_204_NO_CONTENT)
+async def stop_all_deployments(manager: LifecycleManager = Depends(get_manager)):
+    await manager.stop()  # stops all
 
 
 @router.get("/models")
@@ -112,6 +129,28 @@ def delete_model(name: str, conn: sqlite3.Connection = Depends(get_conn)):
     if m is None:
         raise HTTPException(404, f"model {name!r} not found")
     model_store.delete(conn, m.id)
+
+
+@router.post("/deployments/{dep_id}/pin", status_code=status.HTTP_204_NO_CONTENT)
+async def pin_deployment(
+    dep_id: int,
+    manager: LifecycleManager = Depends(get_manager),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    if dep_store.get_by_id(conn, dep_id) is None:
+        raise HTTPException(404, f"no deployment with id {dep_id}")
+    await manager.pin(dep_id, True)
+
+
+@router.post("/deployments/{dep_id}/unpin", status_code=status.HTTP_204_NO_CONTENT)
+async def unpin_deployment(
+    dep_id: int,
+    manager: LifecycleManager = Depends(get_manager),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    if dep_store.get_by_id(conn, dep_id) is None:
+        raise HTTPException(404, f"no deployment with id {dep_id}")
+    await manager.pin(dep_id, False)
 
 
 @router.get("/deployments/current/logs")

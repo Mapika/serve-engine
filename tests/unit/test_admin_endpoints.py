@@ -88,3 +88,68 @@ async def test_list_models(app):
     assert r.status_code == 200
     names = [m["name"] for m in r.json()]
     assert "x" in names
+
+
+@pytest.mark.asyncio
+async def test_pin_unpin_deployment(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        r = await c.post(
+            "/admin/deployments",
+            json={
+                "model_name": "x",
+                "hf_repo": "org/x",
+                "image_tag": "img:v1",
+                "gpu_ids": [0],
+                "max_model_len": 4096,
+            },
+        )
+        dep_id = r.json()["id"]
+
+        r = await c.post(f"/admin/deployments/{dep_id}/pin")
+        assert r.status_code == 204
+
+        r = await c.get("/admin/deployments")
+        assert r.json()[0]["pinned"] is True
+
+        r = await c.post(f"/admin/deployments/{dep_id}/unpin")
+        assert r.status_code == 204
+        r = await c.get("/admin/deployments")
+        assert r.json()[0]["pinned"] is False
+
+
+@pytest.mark.asyncio
+async def test_pin_404(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test",
+    ) as c:
+        r = await c.post("/admin/deployments/999/pin")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_deployment_by_id(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        r = await c.post(
+            "/admin/deployments",
+            json={
+                "model_name": "x",
+                "hf_repo": "org/x",
+                "image_tag": "img:v1",
+                "gpu_ids": [0],
+                "max_model_len": 4096,
+            },
+        )
+        dep_id = r.json()["id"]
+        r = await c.delete(f"/admin/deployments/{dep_id}")
+        assert r.status_code == 204
+        r = await c.get("/admin/deployments")
+        deps = r.json()
+        # Deployment row still exists but in stopped status
+        assert deps[0]["status"] == "stopped"
