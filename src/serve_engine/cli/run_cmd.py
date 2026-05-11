@@ -23,6 +23,10 @@ def run(
         None, "--idle-timeout",
         help="Seconds idle before auto-eviction (default: server config)",
     ),
+    engine: str = typer.Option(
+        None, "--engine",
+        help="Force a specific engine (vllm | sglang). Default: auto-select.",
+    ),
 ):
     """Load a model and make it active. Stops the current model first."""
     gpu_ids = [int(g) for g in gpu.split(",") if g.strip()]
@@ -54,6 +58,8 @@ def run(
         body["idle_timeout_s"] = idle_timeout_s
     if image_tag is not None:
         body["image_tag"] = image_tag
+    if engine is not None:
+        body["backend"] = engine
 
     typer.echo(f"loading {local_name} on GPU(s) {gpu_ids} ...")
     try:
