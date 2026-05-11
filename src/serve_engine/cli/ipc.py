@@ -43,4 +43,8 @@ async def delete(sock: Path, path: str) -> None:
     async with _client(sock) as c:
         r = await c.delete(path)
         if r.status_code >= 400 and r.status_code != 404:
-            raise RuntimeError(f"daemon error {r.status_code}: {r.text}")
+            try:
+                detail = r.json().get("detail", r.text)
+            except Exception:
+                detail = r.text
+            raise RuntimeError(f"daemon error {r.status_code}: {detail}")
