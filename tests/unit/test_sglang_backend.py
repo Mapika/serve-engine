@@ -8,7 +8,7 @@ def _plan(**overrides):
         hf_repo="meta-llama/Llama-3.2-1B-Instruct",
         revision="main",
         backend="sglang",
-        image_tag="lmsysorg/sglang:v0.5.5.post1",
+        image_tag="lmsysorg/sglang:v0.5.11",
         gpu_ids=[0],
         max_model_len=8192,
     )

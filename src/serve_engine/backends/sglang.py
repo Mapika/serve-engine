@@ -11,7 +11,7 @@ INTERNAL_PORT = 30000
 
 class SGLangBackend:
     name: ClassVar[str] = "sglang"
-    image_default: ClassVar[str] = "lmsysorg/sglang:v0.5.5.post1"
+    image_default: ClassVar[str] = "lmsysorg/sglang:v0.5.11"
     health_path: ClassVar[str] = "/health"
     openai_base: ClassVar[str] = "/v1"
     metrics_path: ClassVar[str] = "/metrics"
