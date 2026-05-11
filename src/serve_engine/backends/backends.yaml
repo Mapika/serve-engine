@@ -1,0 +1,31 @@
+# Pinned engine images. Update via `serve update-engines` (Plan 08) or
+# `serve config set engine.<name>.image <tag>`.
+
+vllm:
+  image: vllm/vllm-openai
+  pinned_tag: v0.20.2
+  health_path: /health
+  openai_base: /v1
+  metrics_path: /metrics
+  internal_port: 8000
+  headroom:
+    # Effective gpu_memory_utilization = max(estimate * factor,
+    # estimate + min_extra_mb, per_gpu_mb * min_floor_pct/100).
+    # Constants tuned for vLLM 0.20.x; revisit if upgrading.
+    factor: 1.5
+    min_extra_mb: 2048
+    min_floor_pct: 15
+
+sglang:
+  image: lmsysorg/sglang
+  pinned_tag: v0.5.11
+  health_path: /health
+  openai_base: /v1
+  metrics_path: /metrics
+  internal_port: 30000
+  headroom:
+    # SGLang's mem-fraction-static is less forgiving on small models;
+    # bump the floor a bit relative to vLLM. Empirical.
+    factor: 1.6
+    min_extra_mb: 2048
+    min_floor_pct: 20

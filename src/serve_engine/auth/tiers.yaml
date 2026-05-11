@@ -1,0 +1,33 @@
+# Default tier definitions. Overridable per-tier via /admin/tiers (future plans).
+# All values are integer caps per window. null = no cap.
+
+tiers:
+  admin:
+    rpm: null
+    tpm: null
+    rpd: null
+    tpd: null
+    rph: null
+    tph: null
+    rpw: null
+    tpw: null
+
+  standard:
+    rpm: 60
+    tpm: 100000
+    rph: 2000
+    tph: 3000000
+    rpd: 20000
+    tpd: 30000000
+    rpw: 100000
+    tpw: 200000000
+
+  trial:
+    rpm: 10
+    tpm: 10000
+    rph: 200
+    tph: 200000
+    rpd: 1000
+    tpd: 1000000
+    rpw: 5000
+    tpw: 5000000
