@@ -11,7 +11,7 @@ import uvicorn
 
 from serve_engine import config
 from serve_engine.backends.vllm import VLLMBackend
-from serve_engine.daemon.app import build_app
+from serve_engine.daemon.app import build_apps
 from serve_engine.lifecycle.docker_client import DockerClient
 from serve_engine.store import db
 
@@ -38,7 +38,7 @@ async def serve(public_host: str, public_port: int, sock_path: Path) -> None:
     docker_client = DockerClient(network_name=config.DOCKER_NETWORK_NAME)
     docker_client.ensure_network()
 
-    app = build_app(
+    tcp_app, uds_app = build_apps(
         conn=conn,
         docker_client=docker_client,
         backends={"vllm": VLLMBackend()},
@@ -48,8 +48,8 @@ async def serve(public_host: str, public_port: int, sock_path: Path) -> None:
     if sock_path.exists():
         sock_path.unlink()
 
-    tcp_cfg = uvicorn.Config(app=app, host=public_host, port=public_port, log_level="info")
-    uds_cfg = uvicorn.Config(app=app, uds=str(sock_path), log_level="info")
+    tcp_cfg = uvicorn.Config(app=tcp_app, host=public_host, port=public_port, log_level="info")
+    uds_cfg = uvicorn.Config(app=uds_app, uds=str(sock_path), log_level="info")
     tcp_server = uvicorn.Server(tcp_cfg)
     uds_server = uvicorn.Server(uds_cfg)
     await asyncio.gather(tcp_server.serve(), uds_server.serve())
