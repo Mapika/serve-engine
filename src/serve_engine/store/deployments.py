@@ -27,6 +27,7 @@ class Deployment:
     pinned: bool
     idle_timeout_s: int | None
     vram_reserved_mb: int
+    last_request_at: str | None
 
 
 def _row_to_dep(row: sqlite3.Row) -> Deployment:
@@ -50,6 +51,7 @@ def _row_to_dep(row: sqlite3.Row) -> Deployment:
         pinned=bool(row["pinned"]),
         idle_timeout_s=row["idle_timeout_s"],
         vram_reserved_mb=row["vram_reserved_mb"],
+        last_request_at=row["last_request_at"],
     )
 
 
