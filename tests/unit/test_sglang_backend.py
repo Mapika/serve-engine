@@ -50,8 +50,8 @@ def test_container_kwargs_gpu_request():
 
 
 def test_default_image():
-    assert SGLangBackend.image_default.startswith("lmsysorg/sglang:")
+    assert SGLangBackend().image_default.startswith("lmsysorg/sglang:")
 
 
 def test_internal_port():
-    assert SGLangBackend.internal_port == 30000
+    assert SGLangBackend().internal_port == 30000

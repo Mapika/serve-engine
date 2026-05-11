@@ -47,4 +47,4 @@ def test_container_kwargs_gpu_request():
 
 
 def test_default_image():
-    assert VLLMBackend.image_default.startswith("vllm/vllm-openai:")
+    assert VLLMBackend().image_default.startswith("vllm/vllm-openai:")

@@ -48,9 +48,11 @@ async def serve(public_host: str, public_port: int, sock_path: Path) -> None:
         [list(topology.nvlink_island(g.index)) for g in topology.gpus],
     )
 
+    from serve_engine.backends.manifest import load_manifest
+    manifest = load_manifest()
     backends = {
-        "vllm": VLLMBackend(),
-        "sglang": SGLangBackend(),
+        "vllm": VLLMBackend(manifest["vllm"]),
+        "sglang": SGLangBackend(manifest["sglang"]),
     }
     tcp_app, uds_app = build_apps(
         conn=conn,

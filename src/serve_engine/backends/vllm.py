@@ -1,21 +1,43 @@
 from __future__ import annotations
 
-from typing import ClassVar
-
 from docker.types import Ulimit  # type: ignore[import-untyped]
 
+from serve_engine.backends.manifest import EngineManifest
 from serve_engine.lifecycle.plan import DeploymentPlan
-
-ENGINE_INTERNAL_PORT = 8000
 
 
 class VLLMBackend:
-    name: ClassVar[str] = "vllm"
-    image_default: ClassVar[str] = "vllm/vllm-openai:v0.20.2"
-    health_path: ClassVar[str] = "/health"
-    openai_base: ClassVar[str] = "/v1"
-    metrics_path: ClassVar[str] = "/metrics"
-    internal_port: ClassVar[int] = ENGINE_INTERNAL_PORT
+    name = "vllm"
+
+    def __init__(self, manifest: EngineManifest | None = None):
+        if manifest is None:
+            from serve_engine.backends.manifest import load_manifest
+            manifest = load_manifest()["vllm"]
+        self._m = manifest
+
+    @property
+    def image_default(self) -> str:
+        return self._m.image_default
+
+    @property
+    def health_path(self) -> str:
+        return self._m.health_path
+
+    @property
+    def openai_base(self) -> str:
+        return self._m.openai_base
+
+    @property
+    def metrics_path(self) -> str:
+        return self._m.metrics_path
+
+    @property
+    def internal_port(self) -> int:
+        return self._m.internal_port
+
+    @property
+    def headroom(self):
+        return self._m.headroom
 
     def build_argv(self, plan: DeploymentPlan, *, local_model_path: str) -> list[str]:
         argv: list[str] = [
@@ -25,7 +47,7 @@ class VLLMBackend:
             "--gpu-memory-utilization", str(plan.gpu_memory_utilization),
             "--dtype", plan.dtype,
             "--host", "0.0.0.0",
-            "--port", str(ENGINE_INTERNAL_PORT),
+            "--port", str(self._m.internal_port),
             "--served-model-name", plan.model_name,
         ]
         if plan.enable_prefix_caching:
