@@ -118,7 +118,7 @@ async def test_proxy_streams_response(app_with_active_deployment):
 
 
 @pytest.mark.asyncio
-async def test_proxy_404_when_no_active(tmp_path, monkeypatch):
+async def test_proxy_503_when_no_active(tmp_path, monkeypatch):
     docker_client = MagicMock()
     conn = db.connect(tmp_path / "t.db")
     db.init_schema(conn)

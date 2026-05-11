@@ -37,7 +37,10 @@ async def _proxy(request: Request, openai_subpath: str) -> StreamingResponse:
 
     base = f"http://{active.container_name}:{active.container_port}{backend.openai_base}"
     body = await request.body()
-    headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
+    _HOP_BY_HOP = {"host", "content-length", "transfer-encoding", "connection"}
+    headers = {
+        k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP
+    }
 
     client = make_engine_client(base)
     upstream = client.stream("POST", openai_subpath, content=body, headers=headers)
