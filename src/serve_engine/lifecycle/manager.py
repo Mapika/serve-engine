@@ -23,9 +23,10 @@ async def download_model_async(**kwargs) -> str:
 
 
 async def wait_healthy(url: str, *, timeout_s: float = 600.0, interval_s: float = 2.0) -> bool:
-    deadline = asyncio.get_event_loop().time() + timeout_s
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
     async with httpx.AsyncClient(timeout=5.0) as client:
-        while asyncio.get_event_loop().time() < deadline:
+        while loop.time() < deadline:
             try:
                 r = await client.get(url)
                 if r.status_code == 200:
@@ -112,11 +113,12 @@ class LifecycleManager:
             ok = await wait_healthy(health_url, timeout_s=self._load_timeout_s)
             if not ok:
                 self._docker.stop(handle.id, timeout=10)
-                dep_store.update_status(
-                    self._conn, dep.id, "failed",
-                    last_error="engine did not become healthy within load timeout",
+                msg = (
+                    f"engine did not become healthy within load timeout "
+                    f"({health_url})"
                 )
-                raise RuntimeError("engine did not become healthy within load timeout")
+                dep_store.update_status(self._conn, dep.id, "failed", last_error=msg)
+                raise RuntimeError(msg)
 
             dep_store.update_status(self._conn, dep.id, "ready")
             return dep_store.get_by_id(self._conn, dep.id)
