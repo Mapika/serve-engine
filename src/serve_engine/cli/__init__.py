@@ -22,4 +22,5 @@ from serve_engine.cli import (  # noqa: E402
     stop_cmd,  # noqa: F401  registers command
     top_cmd,  # noqa: F401  registers command
     unpin_cmd,  # noqa: F401  registers command
+    update_engines_cmd,  # noqa: F401  registers command
 )

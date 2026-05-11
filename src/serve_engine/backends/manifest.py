@@ -6,6 +6,8 @@ from pathlib import Path
 
 import yaml
 
+from serve_engine import config
+
 
 @dataclass(frozen=True)
 class Headroom:
@@ -39,12 +41,38 @@ class EngineManifest:
         return f"{self.image}:{self.pinned_tag}"
 
 
+def _parse(text: str) -> dict:
+    return yaml.safe_load(text) or {}
+
+
+def _merge(base: dict, override: dict) -> dict:
+    out = dict(base)
+    for name, ov in override.items():
+        if name in out and isinstance(ov, dict):
+            merged = dict(out[name])
+            for k, v in ov.items():
+                if k == "headroom" and isinstance(v, dict) and "headroom" in merged:
+                    hr = dict(merged["headroom"])
+                    hr.update(v)
+                    merged["headroom"] = hr
+                else:
+                    merged[k] = v
+            out[name] = merged
+        else:
+            out[name] = ov
+    return out
+
+
 def load_manifest(path: Path | None = None) -> dict[str, EngineManifest]:
     if path is None:
         text = files("serve_engine.backends").joinpath("backends.yaml").read_text()
+        raw = _parse(text)
+        override_path = config.SERVE_DIR / "backends.override.yaml"
+        if override_path.exists():
+            raw = _merge(raw, _parse(override_path.read_text()))
     else:
-        text = Path(path).read_text()
-    raw = yaml.safe_load(text) or {}
+        raw = _parse(Path(path).read_text())
+
     out: dict[str, EngineManifest] = {}
     for name, e in raw.items():
         hr = e.get("headroom") or {}
@@ -63,3 +91,20 @@ def load_manifest(path: Path | None = None) -> dict[str, EngineManifest]:
             ),
         )
     return out
+
+
+def write_override(updates: dict[str, dict]) -> Path:
+    """Persist user-level overrides to ~/.serve/backends.override.yaml.
+
+    `updates` is {engine_name: partial_engine_config} (typically just
+    {'pinned_tag': 'v0.20.5'}). Existing override entries are merged.
+    """
+    override_path = config.SERVE_DIR / "backends.override.yaml"
+    override_path.parent.mkdir(parents=True, exist_ok=True)
+    if override_path.exists():
+        current = _parse(override_path.read_text())
+    else:
+        current = {}
+    merged = _merge(current, updates)
+    override_path.write_text(yaml.safe_dump(merged, sort_keys=True))
+    return override_path
