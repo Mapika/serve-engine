@@ -168,11 +168,21 @@ class LifecycleManager:
             container_model_path = "/cache/" + str(
                 Path(local_path).resolve().relative_to(self._models_dir.resolve())
             )
-            # Rebuild plan with the placement-chosen GPU set so backend argv reflects reality
+            # Rebuild plan with the placement-chosen GPU set AND a per-deployment
+            # gpu_memory_utilization derived from our reservation. Without this
+            # override every vLLM container takes its requested fraction of the
+            # *whole* GPU, so two co-located deployments fight for memory and
+            # the later one OOMs. We compute fraction = (our share per GPU)
+            # / (per-GPU total), with a small safety margin under 1.0.
+            tp = len(gpu_ids)
+            per_gpu_mb = self._topology.gpus[gpu_ids[0]].total_mb
+            per_gpu_reserved = vram_mb / tp
+            mem_util = min(0.95, max(0.05, per_gpu_reserved / per_gpu_mb))
             effective_plan = replace(
                 plan,
                 gpu_ids=list(gpu_ids),
-                tensor_parallel=len(gpu_ids),
+                tensor_parallel=tp,
+                gpu_memory_utilization=mem_util,
             )
             handle = self._docker.run(
                 image=plan.image_tag,
