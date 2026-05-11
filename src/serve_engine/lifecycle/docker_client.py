@@ -48,14 +48,28 @@ class DockerClient:
             environment=environment,
             volumes=volumes,
             network=self._network_name,
+            ports={f"{internal_port}/tcp": ("127.0.0.1", None)},
             detach=True,
             **kwargs,
         )
+        # Reload to pick up port allocation
+        container.reload()
+        port_bindings = container.attrs.get("NetworkSettings", {}).get("Ports", {}) or {}
+        binding = port_bindings.get(f"{internal_port}/tcp")
+        if not binding:
+            # Container started but the port mapping isn't reported yet; this is rare
+            # but defensible — fall back to the internal port on the container name
+            # (only works if daemon is on the same docker network; documented limitation).
+            host_port = internal_port
+            address = name
+        else:
+            host_port = int(binding[0]["HostPort"])
+            address = "127.0.0.1"
         return ContainerHandle(
             id=container.id,
             name=name,
-            address=name,  # talk by container name on the bridge
-            port=internal_port,
+            address=address,
+            port=host_port,
         )
 
     def stop(self, container_id: str, *, timeout: int = 30) -> None:

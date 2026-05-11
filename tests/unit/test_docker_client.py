@@ -13,8 +13,12 @@ def fake_docker():
     container.id = "abc123"
     container.name = "vllm-llama-1b"
     container.attrs = {
-        "NetworkSettings": {"Networks": {"serve-engines": {"IPAddress": "172.20.0.5"}}}
+        "NetworkSettings": {
+            "Ports": {"8000/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49152"}]},
+            "Networks": {"serve-engines": {"IPAddress": "172.20.0.5"}},
+        }
     }
+    container.reload = MagicMock()  # no-op; attrs is already populated above
     client.containers.run.return_value = container
     return client
 
@@ -32,8 +36,11 @@ def test_run_container_returns_handle(fake_docker):
     )
     assert isinstance(handle, ContainerHandle)
     assert handle.id == "abc123"
-    assert handle.address == "vllm-llama-1b"
-    assert handle.port == 8000
+    assert handle.address == "127.0.0.1"  # bound to localhost
+    assert handle.port == 49152            # allocated host port
+    # Verify ports kwarg was passed
+    call_kwargs = fake_docker.containers.run.call_args.kwargs
+    assert call_kwargs["ports"] == {"8000/tcp": ("127.0.0.1", None)}
 
 
 def test_run_creates_network_if_missing(fake_docker):
