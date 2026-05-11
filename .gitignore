@@ -7,3 +7,6 @@ __pycache__/
 dist/
 *.egg-info/
 .serve/
+ui/node_modules/
+ui/dist/
+ui/tsconfig.tsbuildinfo
