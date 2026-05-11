@@ -31,6 +31,10 @@ class SGLangBackend:
             "--host", "0.0.0.0",
             "--port", str(INTERNAL_PORT),
             "--served-model-name", plan.model_name,
+            # Piecewise CUDA graph compilation in v0.5.11 hit CUBLAS_STATUS_EXECUTION_FAILED
+            # on small models. Disabling falls back to regular CUDA graphs (still fast).
+            # Re-evaluate once a fixed SGLang release ships.
+            "--disable-piecewise-cuda-graph",
         ]
         for k, v in plan.extra_args.items():
             argv.extend([k, v])
