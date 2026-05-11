@@ -11,6 +11,8 @@ from serve_engine.store import db
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
+    from serve_engine.lifecycle.topology import GPUInfo, Topology
+
     monkeypatch.setattr(
         "serve_engine.lifecycle.manager.wait_healthy",
         AsyncMock(return_value=True),
@@ -19,17 +21,30 @@ def app(tmp_path, monkeypatch):
         "serve_engine.lifecycle.manager.download_model_async",
         AsyncMock(return_value=str(tmp_path / "weights")),
     )
+    monkeypatch.setattr(
+        "serve_engine.lifecycle.manager.estimate_vram_mb",
+        lambda inp: 20_000,
+    )
+    (tmp_path / "weights").mkdir(exist_ok=True)
+
     docker_client = MagicMock()
     docker_client.run.return_value = ContainerHandle(
-        id="cid", name="x", address="x", port=8000
+        id="cid", name="x", address="127.0.0.1", port=49152,
     )
+
     conn = db.connect(tmp_path / "t.db")
     db.init_schema(conn)
+
+    topology = Topology(
+        gpus=[GPUInfo(index=0, name="H100", total_mb=80 * 1024)],
+        _islands={0: frozenset({0})},
+    )
     return build_app(
         conn=conn,
         docker_client=docker_client,
         backends={"vllm": VLLMBackend()},
         models_dir=tmp_path,
+        topology=topology,
     )
 
 

@@ -10,6 +10,7 @@ from serve_engine.daemon.admin import router as admin_router
 from serve_engine.daemon.openai_proxy import router as openai_router
 from serve_engine.lifecycle.docker_client import DockerClient
 from serve_engine.lifecycle.manager import LifecycleManager
+from serve_engine.lifecycle.topology import Topology
 
 
 def _attach_state(
@@ -34,6 +35,7 @@ def build_apps(
     docker_client: DockerClient,
     backends: dict[str, Backend],
     models_dir: Path,
+    topology: Topology | None = None,
 ) -> tuple[FastAPI, FastAPI]:
     """Returns (tcp_app, uds_app) sharing the same LifecycleManager.
 
@@ -45,6 +47,7 @@ def build_apps(
         docker_client=docker_client,
         backends=backends,
         models_dir=models_dir,
+        topology=topology,
     )
 
     tcp_app = FastAPI(title="serve-engine (public)", version="0.0.1")
@@ -65,6 +68,7 @@ def build_app(
     docker_client: DockerClient,
     backends: dict[str, Backend],
     models_dir: Path,
+    topology: Topology | None = None,
 ) -> FastAPI:
     """Single-app factory retained for tests that exercise the full surface."""
     _, uds_app = build_apps(
@@ -72,5 +76,6 @@ def build_app(
         docker_client=docker_client,
         backends=backends,
         models_dir=models_dir,
+        topology=topology,
     )
     return uds_app

@@ -38,11 +38,21 @@ async def serve(public_host: str, public_port: int, sock_path: Path) -> None:
     docker_client = DockerClient(network_name=config.DOCKER_NETWORK_NAME)
     docker_client.ensure_network()
 
+    from serve_engine.lifecycle.topology import read_topology
+    topology = read_topology()
+    log_ = logging.getLogger(__name__)
+    log_.info(
+        "topology: %d GPUs, islands=%s",
+        len(topology.gpus),
+        [list(topology.nvlink_island(g.index)) for g in topology.gpus],
+    )
+
     tcp_app, uds_app = build_apps(
         conn=conn,
         docker_client=docker_client,
         backends={"vllm": VLLMBackend()},
         models_dir=config.MODELS_DIR,
+        topology=topology,
     )
 
     if sock_path.exists():

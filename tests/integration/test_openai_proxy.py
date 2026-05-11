@@ -43,6 +43,8 @@ class FakeEngineApp:
 
 @pytest.fixture
 def app_with_active_deployment(tmp_path, monkeypatch):
+    from serve_engine.lifecycle.topology import GPUInfo, Topology
+
     fake_engine = FakeEngineApp([b"data: hello\n\n", b"data: [DONE]\n\n"])
 
     def fake_async_client_factory(base_url):
@@ -61,19 +63,31 @@ def app_with_active_deployment(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "serve_engine.lifecycle.manager.download_model_async",
-        AsyncMock(return_value=str(tmp_path / "w")),
+        AsyncMock(return_value=str(tmp_path / "weights")),
     )
+    monkeypatch.setattr(
+        "serve_engine.lifecycle.manager.estimate_vram_mb",
+        lambda inp: 20_000,
+    )
+    (tmp_path / "weights").mkdir(exist_ok=True)
+
     docker_client = MagicMock()
     docker_client.run.return_value = ContainerHandle(
-        id="cid", name="engine", address="engine", port=8000
+        id="cid", name="engine", address="127.0.0.1", port=8000,
     )
     conn = db.connect(tmp_path / "t.db")
     db.init_schema(conn)
+
+    topology = Topology(
+        gpus=[GPUInfo(index=0, name="H100", total_mb=80 * 1024)],
+        _islands={0: frozenset({0})},
+    )
     app = build_app(
         conn=conn,
         docker_client=docker_client,
         backends={"vllm": VLLMBackend()},
         models_dir=tmp_path,
+        topology=topology,
     )
 
     async def setup():
