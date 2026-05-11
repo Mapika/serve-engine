@@ -85,18 +85,35 @@ def check_docker() -> CheckResult:
         info = client.info()
         version = client.version().get("Version", "?")
         runtimes = info.get("Runtimes", {})
-        if "nvidia" not in runtimes:
+        # Docker 28+ uses CDI for GPU access and no longer advertises an
+        # `nvidia` runtime in `docker info`. We probe with a short-lived
+        # container that requests a GPU; if it starts, GPU support works
+        # regardless of the runtime registry.
+        if "nvidia" in runtimes:
+            return CheckResult(
+                name="docker",
+                status="ok",
+                detail=f"docker {version} with nvidia runtime",
+            )
+        try:
+            client.containers.run(
+                "alpine:latest",
+                command=["true"],
+                device_requests=[{"Driver": "nvidia", "Count": 1, "Capabilities": [["gpu"]]}],
+                remove=True,
+            )
+            return CheckResult(
+                name="docker",
+                status="ok",
+                detail=f"docker {version} (GPU device_requests work; CDI mode)",
+            )
+        except Exception as e:
             return CheckResult(
                 name="docker",
                 status="warn",
-                detail=f"docker {version} OK, but nvidia runtime missing",
+                detail=f"docker {version} OK, but GPU device_requests failed: {e}",
                 fix="install nvidia-container-toolkit and restart dockerd",
             )
-        return CheckResult(
-            name="docker",
-            status="ok",
-            detail=f"docker {version} with nvidia runtime",
-        )
     except Exception as e:
         return CheckResult(
             name="docker", status="warn", detail=f"docker reachable but info failed: {e}"
