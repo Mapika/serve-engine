@@ -245,6 +245,55 @@ class LifecycleManager:
         dep_store.set_pinned(self._conn, dep_id, pinned)
         await self._emit("deployment.pinned" if pinned else "deployment.unpinned", dep_id=dep_id)
 
+    async def reconcile(self) -> None:
+        """At startup: walk ready deployments, verify their containers exist.
+
+        If the daemon crashed between marking 'ready' and (e.g.) the user
+        running `serve stop`, the DB row is stale. We can't reliably re-bind
+        to a running container (we'd need to repopulate routing tables and
+        recompute the host port). Simpler and safer: mark stale rows failed
+        and let the user re-load.
+        """
+        async with self._lock:
+            for d in dep_store.list_ready(self._conn):
+                if d.container_id is None:
+                    continue
+                try:
+                    container = self._docker._client.containers.get(d.container_id)
+                    status = container.status
+                except Exception:
+                    log.warning(
+                        "reconcile: deployment %s container %s missing; marking failed",
+                        d.id, d.container_id,
+                    )
+                    dep_store.update_status(
+                        self._conn, d.id, "failed",
+                        last_error="container disappeared while daemon was down",
+                    )
+                    continue
+                if status != "running":
+                    log.warning(
+                        "reconcile: deployment %s container %s status=%s; cleaning",
+                        d.id, d.container_id, status,
+                    )
+                    try:
+                        container.remove(force=True)
+                    except Exception:
+                        pass
+                    dep_store.update_status(
+                        self._conn, d.id, "failed",
+                        last_error=f"container exited (status={status}) while daemon was down",
+                    )
+                else:
+                    log.info("reconcile: deployment %s re-adopted (%s running)",
+                             d.id, d.container_id)
+
+    async def stop_all(self) -> None:
+        """Stop every ready deployment. Called from lifespan shutdown."""
+        async with self._lock:
+            for d in dep_store.list_ready(self._conn):
+                await self._stop_locked(d.id)
+
     async def _stop_locked(self, dep_id: int) -> None:
         dep = dep_store.get_by_id(self._conn, dep_id)
         if dep is None:

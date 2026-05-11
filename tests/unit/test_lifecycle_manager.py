@@ -148,3 +148,96 @@ def test_load_marks_failed_on_unhealthy(conn, monkeypatch, tmp_path, topo_one_gp
         asyncio.run(mgr.load(_make_plan()))
     docker_client.stop.assert_called_once()
     assert dep_store.find_active(conn) is None
+
+
+def test_reconcile_marks_orphan_failed(conn, monkeypatch, tmp_path, topo_one_gpu):
+    """A ready row whose container no longer exists must be marked failed."""
+    from docker.errors import NotFound
+    docker_client = MagicMock()
+
+    # Make containers.get raise NotFound for our orphan
+    inner_client = MagicMock()
+    inner_client.containers.get.side_effect = NotFound("gone")
+    docker_client._client = inner_client
+
+    mgr = LifecycleManager(
+        conn=conn, docker_client=docker_client,
+        backends={"vllm": VLLMBackend()}, models_dir=tmp_path,
+        topology=topo_one_gpu,
+    )
+    # Seed a fake ready deployment in the DB
+    m = model_store.add(conn, name="llama-1b", hf_repo="org/x")
+    d = dep_store.create(
+        conn, model_id=m.id, backend="vllm", image_tag="img:v1",
+        gpu_ids=[0], tensor_parallel=1, max_model_len=4096, dtype="auto",
+    )
+    dep_store.set_container(
+        conn, d.id,
+        container_id="orphan_cid", container_name="x",
+        container_port=49152, container_address="127.0.0.1",
+    )
+    dep_store.update_status(conn, d.id, "ready")
+
+    asyncio.run(mgr.reconcile())
+
+    refreshed = dep_store.get_by_id(conn, d.id)
+    assert refreshed.status == "failed"
+    assert "disappeared" in (refreshed.last_error or "")
+
+
+def test_reconcile_keeps_running_container(conn, monkeypatch, tmp_path, topo_one_gpu):
+    docker_client = MagicMock()
+    inner_client = MagicMock()
+    fake_container = MagicMock()
+    fake_container.status = "running"
+    inner_client.containers.get.return_value = fake_container
+    docker_client._client = inner_client
+
+    mgr = LifecycleManager(
+        conn=conn, docker_client=docker_client,
+        backends={"vllm": VLLMBackend()}, models_dir=tmp_path,
+        topology=topo_one_gpu,
+    )
+    m = model_store.add(conn, name="llama-1b", hf_repo="org/x")
+    d = dep_store.create(
+        conn, model_id=m.id, backend="vllm", image_tag="img:v1",
+        gpu_ids=[0], tensor_parallel=1, max_model_len=4096, dtype="auto",
+    )
+    dep_store.set_container(
+        conn, d.id,
+        container_id="live_cid", container_name="x",
+        container_port=49152, container_address="127.0.0.1",
+    )
+    dep_store.update_status(conn, d.id, "ready")
+
+    asyncio.run(mgr.reconcile())
+
+    refreshed = dep_store.get_by_id(conn, d.id)
+    assert refreshed.status == "ready"  # unchanged
+
+
+def test_stop_all_stops_every_ready(conn, monkeypatch, tmp_path, topo_one_gpu):
+    docker_client = MagicMock()
+    mgr = LifecycleManager(
+        conn=conn, docker_client=docker_client,
+        backends={"vllm": VLLMBackend()}, models_dir=tmp_path,
+        topology=topo_one_gpu,
+    )
+    m = model_store.add(conn, name="llama-1b", hf_repo="org/x")
+    for cid in ("c1", "c2", "c3"):
+        d = dep_store.create(
+            conn, model_id=m.id, backend="vllm", image_tag="img:v1",
+            gpu_ids=[0], tensor_parallel=1, max_model_len=4096, dtype="auto",
+        )
+        dep_store.set_container(
+            conn, d.id, container_id=cid, container_name=cid,
+            container_port=49152, container_address="127.0.0.1",
+        )
+        dep_store.update_status(conn, d.id, "ready")
+
+    asyncio.run(mgr.stop_all())
+
+    # All three should be stopped
+    statuses = [dep.status for dep in dep_store.list_all(conn)]
+    assert all(s == "stopped" for s in statuses)
+    assert docker_client.stop.call_count == 3
