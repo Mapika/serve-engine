@@ -82,7 +82,7 @@ CLI hits the Unix socket; Web UI hits `/admin/*` on the public port with the adm
 
 ### 4.1 Deployment abstraction
 
-A *deployment* is `(model, gpu_set, backend, image_tag, engine_args, status)`. One model may have multiple deployments (different TP shapes, different engines). State lives in SQLite. Status transitions: `pending → loading → ready → (running) → stopping → stopped`, with `failed` as a terminal state from any of the active states.
+A *deployment* is `(model, gpu_set, backend, image_tag, engine_args, status)`. One model may have multiple deployments (different TP shapes, different engines). State lives in SQLite. Status transitions: `pending → loading → ready → stopping → stopped` (with `ready` and serving requests being the same state), plus `failed` as a terminal state reachable from any active state.
 
 ### 4.2 Model registry & pull
 
@@ -272,7 +272,7 @@ Overridable: `serve config set engine.vllm.image vllm/vllm-openai:v0.7.5`. `serv
 
 The Python orchestrator is not the bottleneck — engine batching is. Our job is to stay out of the way.
 
-- Daemon is fully async (FastAPI + uvicorn + httpx with HTTP/2 to engines). Streaming requests pass through without buffering.
+- Daemon is fully async (FastAPI + uvicorn; httpx async client with a generous connection pool to each engine). Streaming requests pass through without buffering.
 - We do **not** serialise requests; engines receive concurrent in-flight requests so their internal schedulers do the batching.
 - A bounded number of concurrent requests per engine prevents the engine's scheduler queue from growing pathologically.
 - Beyond engine capacity, requests queue at the orchestrator with weighted-fair queueing per API key, so one heavy user can't starve others.
