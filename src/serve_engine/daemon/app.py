@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from serve_engine.auth.tiers import load_tiers
 from serve_engine.backends.base import Backend
 from serve_engine.daemon.admin import router as admin_router
 from serve_engine.daemon.openai_proxy import router as openai_router
@@ -23,6 +24,7 @@ def _attach_state(
     app.state.conn = conn
     app.state.backends = backends
     app.state.manager = manager
+    app.state.tier_cfg = load_tiers()
 
     @app.get("/healthz")
     def healthz():
