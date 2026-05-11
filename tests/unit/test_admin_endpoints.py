@@ -176,6 +176,25 @@ async def test_create_deployment_default_backend_is_vllm(app):
 
 
 @pytest.mark.asyncio
+async def test_list_gpus_returns_list(app, monkeypatch):
+    from serve_engine.observability.gpu_stats import GPUSnapshot
+    monkeypatch.setattr(
+        "serve_engine.daemon.admin._read_gpu_stats",
+        lambda: [GPUSnapshot(
+            index=0, memory_used_mb=10_000, memory_total_mb=80_000,
+            gpu_util_pct=42, power_w=350,
+        )],
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/admin/gpus")
+    assert r.status_code == 200
+    rows = r.json()
+    assert rows[0]["index"] == 0
+    assert rows[0]["gpu_util_pct"] == 42
+
+
+@pytest.mark.asyncio
 async def test_create_list_revoke_key(app):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:

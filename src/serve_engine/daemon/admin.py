@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from serve_engine.backends.base import Backend
 from serve_engine.lifecycle.manager import LifecycleManager
 from serve_engine.lifecycle.plan import DeploymentPlan
+from serve_engine.observability.gpu_stats import read_gpu_stats as _read_gpu_stats
 from serve_engine.store import api_keys as _ak_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
@@ -256,3 +257,18 @@ async def events(request: Request) -> _SSE:
                     yield ":hb\n\n"  # SSE comment heartbeat
 
     return _SSE(gen(), media_type="text/event-stream")
+
+
+@router.get("/gpus")
+def list_gpus():
+    """Per-GPU live snapshot: memory, utilization, power."""
+    return [
+        {
+            "index": s.index,
+            "memory_used_mb": s.memory_used_mb,
+            "memory_total_mb": s.memory_total_mb,
+            "gpu_util_pct": s.gpu_util_pct,
+            "power_w": s.power_w,
+        }
+        for s in _read_gpu_stats()
+    ]
