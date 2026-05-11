@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-SUPPORTED_BACKENDS = ("vllm",)  # Plan 04 adds "sglang"
+SUPPORTED_BACKENDS = ("vllm", "sglang")
 SUPPORTED_DTYPES = ("auto", "bf16", "fp16", "fp8")
 
 
@@ -16,7 +16,7 @@ class DeploymentPlan:
     model_name: str
     hf_repo: str
     revision: str
-    backend: Literal["vllm"]
+    backend: Literal["vllm", "sglang"]
     image_tag: str
     gpu_ids: list[int]
     max_model_len: int
@@ -33,7 +33,7 @@ class DeploymentPlan:
     def __post_init__(self) -> None:
         if self.backend not in SUPPORTED_BACKENDS:
             raise ValueError(
-                f"backend {self.backend!r} not supported in Plan 01 "
+                f"backend {self.backend!r} not supported "
                 f"(supported: {SUPPORTED_BACKENDS})"
             )
         if self.dtype not in SUPPORTED_DTYPES:

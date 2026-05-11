@@ -15,6 +15,7 @@ class VLLMBackend:
     health_path: ClassVar[str] = "/health"
     openai_base: ClassVar[str] = "/v1"
     metrics_path: ClassVar[str] = "/metrics"
+    internal_port: ClassVar[int] = ENGINE_INTERNAL_PORT
 
     def build_argv(self, plan: DeploymentPlan, *, local_model_path: str) -> list[str]:
         argv: list[str] = [

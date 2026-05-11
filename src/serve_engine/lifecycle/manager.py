@@ -202,7 +202,7 @@ class LifecycleManager:
                 environment=backend.container_env(effective_plan),
                 kwargs=backend.container_kwargs(effective_plan),
                 volumes={str(self._models_dir.resolve()): {"bind": "/cache", "mode": "ro"}},
-                internal_port=8000,
+                internal_port=backend.internal_port,
             )
             dep_store.set_container(
                 self._conn, dep.id,
