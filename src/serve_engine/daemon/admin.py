@@ -20,11 +20,35 @@ from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
 
 
+def _is_uds_request(request: Request) -> bool:
+    """True when the request arrived over the Unix domain socket, not TCP.
+
+    Uvicorn's UDS server reports scope['client'] as None (no remote address)
+    whereas TCP delivers a (host, port) tuple. We use 'client' rather than
+    'server' because uvicorn fills 'server' with the listening address even
+    on UDS (e.g. ('', 0)).
+    """
+    client = request.scope.get("client")
+    return client is None
+
+
 def require_admin_key(
     request: Request,
-    key: _ak_store.ApiKey | None = Depends(require_auth_dep),
 ) -> _ak_store.ApiKey | None:
-    """Pass through if no keys exist (homelab bypass), else require tier=admin."""
+    """Authorize /admin/*.
+
+    Trust model:
+    - Local UDS requests bypass auth entirely. The user controls the host
+      filesystem; presence on the socket is sufficient. This is also the
+      bootstrap path: `serve key create web --tier admin` over UDS works
+      even after other tier=admin keys exist.
+    - TCP requests fall through to require_auth_dep. If no keys exist at
+      all, that dep also bypasses (homelab UX). Otherwise it requires a
+      valid Bearer; we then further require tier=admin here.
+    """
+    if _is_uds_request(request):
+        return None
+    key = require_auth_dep(request)
     if key is None:
         return None
     if key.tier != "admin":

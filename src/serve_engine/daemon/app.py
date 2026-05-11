@@ -10,7 +10,7 @@ from serve_engine.backends.base import Backend
 from serve_engine.daemon.admin import router as admin_router
 from serve_engine.daemon.metrics_router import router as metrics_router
 from serve_engine.daemon.openai_proxy import router as openai_router
-from serve_engine.daemon.ui_router import make_ui_router
+from serve_engine.daemon.ui_router import install_ui
 from serve_engine.lifecycle.docker_client import DockerClient
 from serve_engine.lifecycle.manager import LifecycleManager
 from serve_engine.lifecycle.topology import Topology
@@ -65,9 +65,7 @@ def build_apps(
     tcp_app.include_router(openai_router)
     tcp_app.include_router(metrics_router)
     tcp_app.include_router(admin_router)
-    ui_router = make_ui_router()
-    if ui_router is not None:
-        tcp_app.include_router(ui_router)
+    install_ui(tcp_app)
 
     from serve_engine.lifecycle.reaper import Reaper
     from serve_engine.store import deployments as _dep_store
