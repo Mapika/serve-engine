@@ -7,3 +7,5 @@ app = typer.Typer(
     add_completion=False,
     help="serve — single-node inference orchestrator",
 )
+
+from serve_engine.cli import pull_cmd  # noqa: F401,E402  registers command
