@@ -4,6 +4,7 @@ import sqlite3
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from serve_engine.backends.base import Backend
@@ -111,3 +112,21 @@ def delete_model(name: str, conn: sqlite3.Connection = Depends(get_conn)):
     if m is None:
         raise HTTPException(404, f"model {name!r} not found")
     model_store.delete(conn, m.id)
+
+
+@router.get("/deployments/current/logs")
+def stream_current_logs(request: Request):
+    conn: sqlite3.Connection = request.app.state.conn
+    docker_client = request.app.state.manager._docker  # Plan 02 promotes a public accessor
+    active = dep_store.find_active(conn)
+    if active is None or active.container_id is None:
+        raise HTTPException(404, "no active deployment with a running container")
+
+    def gen():
+        for chunk in docker_client.stream_logs(active.container_id, follow=True):
+            if isinstance(chunk, bytes):
+                yield chunk
+            else:
+                yield chunk.encode()
+
+    return StreamingResponse(gen(), media_type="text/plain")
