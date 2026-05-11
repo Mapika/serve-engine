@@ -8,7 +8,10 @@ from pathlib import Path
 from serve_engine.config import DEFAULT_PUBLIC_PORT, SERVE_DIR
 
 try:
-    import pynvml  # type: ignore[import-untyped]
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        import pynvml  # type: ignore[import-untyped]
 except Exception:  # pragma: no cover
     pynvml = None  # type: ignore[assignment]
 
