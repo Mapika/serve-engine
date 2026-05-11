@@ -37,10 +37,18 @@ def test_run_container_returns_handle(fake_docker):
 
 
 def test_run_creates_network_if_missing(fake_docker):
-    fake_docker.networks.get.side_effect = Exception("not found")
+    from docker.errors import NotFound
+    fake_docker.networks.get.side_effect = NotFound("not found")
     dc = DockerClient(client=fake_docker, network_name="serve-engines")
     dc.ensure_network()
     fake_docker.networks.create.assert_called_once_with("serve-engines", driver="bridge")
+
+
+def test_ensure_network_propagates_other_errors(fake_docker):
+    fake_docker.networks.get.side_effect = RuntimeError("daemon connection refused")
+    dc = DockerClient(client=fake_docker, network_name="serve-engines")
+    with pytest.raises(RuntimeError, match="daemon connection refused"):
+        dc.ensure_network()
 
 
 def test_run_skips_network_create_if_present(fake_docker):

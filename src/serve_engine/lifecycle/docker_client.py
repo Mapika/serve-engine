@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 import docker  # type: ignore[import-untyped]
@@ -25,7 +26,7 @@ class DockerClient:
     def ensure_network(self) -> None:
         try:
             self._client.networks.get(self._network_name)
-        except Exception:
+        except NotFound:
             log.info("creating docker network %s", self._network_name)
             self._client.networks.create(self._network_name, driver="bridge")
 
@@ -65,7 +66,7 @@ class DockerClient:
         c.stop(timeout=timeout)
         c.remove()
 
-    def stream_logs(self, container_id: str, *, follow: bool = False):
+    def stream_logs(self, container_id: str, *, follow: bool = False) -> Iterator[bytes]:
         c = self._client.containers.get(container_id)
         return c.logs(stream=True, follow=follow)
 
