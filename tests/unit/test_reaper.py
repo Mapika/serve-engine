@@ -1,0 +1,77 @@
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from serve_engine.lifecycle.reaper import Reaper
+
+
+@pytest.mark.asyncio
+async def test_reaper_evicts_idle():
+    now = 1_000_000
+    deployments = [
+        # idle 600s; default timeout 300 → evict
+        MagicMock(id=1, pinned=False, idle_timeout_s=None,
+                  last_request_at=now - 600, status="ready"),
+        # idle 100s; default timeout 300 → keep
+        MagicMock(id=2, pinned=False, idle_timeout_s=None,
+                  last_request_at=now - 100, status="ready"),
+        # pinned → keep regardless
+        MagicMock(id=3, pinned=True, idle_timeout_s=None,
+                  last_request_at=now - 10_000, status="ready"),
+    ]
+    manager = MagicMock()
+    manager.stop = AsyncMock()
+
+    list_ready = MagicMock(return_value=deployments)
+
+    reaper = Reaper(
+        manager=manager,
+        list_ready=list_ready,
+        default_idle_timeout_s=300,
+        now_fn=lambda: now,
+    )
+    await reaper.tick_once()
+
+    manager.stop.assert_called_once_with(1)
+
+
+@pytest.mark.asyncio
+async def test_reaper_respects_per_deployment_timeout():
+    now = 1_000_000
+    deployments = [
+        # idle 100s; per-deployment 60 → evict
+        MagicMock(id=1, pinned=False, idle_timeout_s=60,
+                  last_request_at=now - 100, status="ready"),
+        # idle 100s; per-deployment 600 → keep
+        MagicMock(id=2, pinned=False, idle_timeout_s=600,
+                  last_request_at=now - 100, status="ready"),
+    ]
+    manager = MagicMock()
+    manager.stop = AsyncMock()
+    reaper = Reaper(
+        manager=manager,
+        list_ready=MagicMock(return_value=deployments),
+        default_idle_timeout_s=300,
+        now_fn=lambda: now,
+    )
+    await reaper.tick_once()
+    manager.stop.assert_called_once_with(1)
+
+
+@pytest.mark.asyncio
+async def test_reaper_skips_when_last_request_at_none():
+    now = 1_000_000
+    deployments = [
+        MagicMock(id=1, pinned=False, idle_timeout_s=None,
+                  last_request_at=None, status="ready"),
+    ]
+    manager = MagicMock()
+    manager.stop = AsyncMock()
+    reaper = Reaper(
+        manager=manager,
+        list_ready=MagicMock(return_value=deployments),
+        default_idle_timeout_s=300,
+        now_fn=lambda: now,
+    )
+    await reaper.tick_once()
+    manager.stop.assert_not_called()

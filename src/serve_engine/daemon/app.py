@@ -54,10 +54,25 @@ def build_apps(
     _attach_state(tcp_app, conn=conn, backends=backends, manager=manager)
     tcp_app.include_router(openai_router)
 
+    from serve_engine.lifecycle.reaper import Reaper
+    from serve_engine.store import deployments as _dep_store
+    reaper = Reaper(
+        manager=manager,
+        list_ready=lambda: _dep_store.list_ready(conn),
+    )
+
     uds_app = FastAPI(title="serve-engine (control)", version="0.0.1")
     _attach_state(uds_app, conn=conn, backends=backends, manager=manager)
     uds_app.include_router(openai_router)
     uds_app.include_router(admin_router)
+
+    @uds_app.on_event("startup")
+    async def _start_reaper() -> None:
+        reaper.start()
+
+    @uds_app.on_event("shutdown")
+    async def _stop_reaper() -> None:
+        await reaper.stop()
 
     return tcp_app, uds_app
 
