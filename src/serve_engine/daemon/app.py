@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from serve_engine.backends.base import Backend
 from serve_engine.daemon.admin import router as admin_router
+from serve_engine.daemon.openai_proxy import router as openai_router
 from serve_engine.lifecycle.docker_client import DockerClient
 from serve_engine.lifecycle.manager import LifecycleManager
 
@@ -28,6 +29,7 @@ def build_app(
         models_dir=models_dir,
     )
     app.include_router(admin_router)
+    app.include_router(openai_router)
 
     @app.get("/healthz")
     def healthz():
