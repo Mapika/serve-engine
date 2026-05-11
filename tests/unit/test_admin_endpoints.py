@@ -153,3 +153,23 @@ async def test_delete_deployment_by_id(app):
         deps = r.json()
         # Deployment row still exists but in stopped status
         assert deps[0]["status"] == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_default_backend_is_vllm(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        r = await c.post(
+            "/admin/deployments",
+            json={
+                "model_name": "x",
+                "hf_repo": "org/x",
+                "image_tag": "img:v1",
+                "gpu_ids": [0],
+                "max_model_len": 4096,
+                # no `backend` field — should default via selection
+            },
+        )
+    assert r.status_code == 201
+    body = r.json()
+    assert body["backend"] == "vllm"

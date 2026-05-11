@@ -33,7 +33,7 @@ class CreateDeploymentRequest(BaseModel):
     model_name: str
     hf_repo: str
     revision: str = "main"
-    backend: str = "vllm"
+    backend: str | None = None   # default → selection rules
     image_tag: str | None = None
     gpu_ids: list[int]
     tensor_parallel: int | None = None
@@ -64,9 +64,13 @@ async def create_deployment(
     manager: LifecycleManager = Depends(get_manager),
     backends: dict[str, Backend] = Depends(get_backends),
 ):
-    if body.backend not in backends:
-        raise HTTPException(400, f"backend {body.backend!r} not supported")
-    backend = backends[body.backend]
+    from serve_engine.backends.selection import load_selection, pick_backend
+    backend_name = body.backend
+    if backend_name is None:
+        backend_name = pick_backend(load_selection(), body.model_name)
+    if backend_name not in backends:
+        raise HTTPException(400, f"backend {backend_name!r} not supported")
+    backend = backends[backend_name]
     image_tag = body.image_tag or backend.image_default
     tp = body.tensor_parallel or len(body.gpu_ids)
     try:
@@ -74,7 +78,7 @@ async def create_deployment(
             model_name=body.model_name,
             hf_repo=body.hf_repo,
             revision=body.revision,
-            backend=body.backend,
+            backend=backend_name,
             image_tag=image_tag,
             gpu_ids=body.gpu_ids,
             tensor_parallel=tp,
