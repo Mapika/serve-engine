@@ -1,0 +1,36 @@
+from unittest.mock import patch
+
+from serve_engine.lifecycle.downloader import download_model
+
+
+def test_download_model_calls_snapshot_download(tmp_path):
+    with patch("serve_engine.lifecycle.downloader.snapshot_download") as mock_sd:
+        mock_sd.return_value = str(tmp_path / "x")
+        result = download_model(
+            hf_repo="meta-llama/Llama-3.2-1B-Instruct",
+            revision="main",
+            cache_dir=tmp_path,
+        )
+    assert result == str(tmp_path / "x")
+    mock_sd.assert_called_once()
+    kwargs = mock_sd.call_args.kwargs
+    assert kwargs["repo_id"] == "meta-llama/Llama-3.2-1B-Instruct"
+    assert kwargs["revision"] == "main"
+    assert kwargs["cache_dir"] == str(tmp_path)
+
+
+def test_download_model_progress_callback(tmp_path):
+    seen: list[str] = []
+    def cb(msg: str) -> None:
+        seen.append(msg)
+
+    with patch("serve_engine.lifecycle.downloader.snapshot_download") as mock_sd:
+        mock_sd.return_value = str(tmp_path / "x")
+        download_model(
+            hf_repo="org/x",
+            revision="main",
+            cache_dir=tmp_path,
+            on_event=cb,
+        )
+    assert any("download started" in s for s in seen)
+    assert any("download complete" in s for s in seen)
