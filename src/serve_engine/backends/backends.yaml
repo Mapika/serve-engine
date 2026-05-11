@@ -1,0 +1,18 @@
+# Pinned engine images. Update via `serve update-engines` (Plan 08) or
+# `serve config set engine.<name>.image <tag>`.
+
+vllm:
+  image: vllm/vllm-openai
+  pinned_tag: v0.20.2
+  health_path: /health
+  openai_base: /v1
+  metrics_path: /metrics
+  internal_port: 8000
+
+sglang:
+  image: lmsysorg/sglang
+  pinned_tag: v0.5.5.post1
+  health_path: /health
+  openai_base: /v1
+  metrics_path: /metrics
+  internal_port: 30000
