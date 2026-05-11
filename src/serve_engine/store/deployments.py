@@ -21,8 +21,12 @@ class Deployment:
     container_id: str | None
     container_name: str | None
     container_port: int | None
+    container_address: str | None
     status: Status
     last_error: str | None
+    pinned: bool
+    idle_timeout_s: int | None
+    vram_reserved_mb: int
 
 
 def _row_to_dep(row: sqlite3.Row) -> Deployment:
@@ -40,8 +44,12 @@ def _row_to_dep(row: sqlite3.Row) -> Deployment:
         container_id=row["container_id"],
         container_name=row["container_name"],
         container_port=row["container_port"],
+        container_address=row["container_address"],
         status=row["status"],
         last_error=row["last_error"],
+        pinned=bool(row["pinned"]),
+        idle_timeout_s=row["idle_timeout_s"],
+        vram_reserved_mb=row["vram_reserved_mb"],
     )
 
 
@@ -55,17 +63,27 @@ def create(
     tensor_parallel: int,
     max_model_len: int | None,
     dtype: str,
+    pinned: bool = False,
+    idle_timeout_s: int | None = None,
+    vram_reserved_mb: int = 0,
 ) -> Deployment:
     gpu_csv = ",".join(str(g) for g in gpu_ids)
     cur = conn.execute(
         """
         INSERT INTO deployments
-            (model_id, backend, image_tag, gpu_ids, tensor_parallel, max_model_len, dtype)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (model_id, backend, image_tag, gpu_ids, tensor_parallel,
+             max_model_len, dtype, pinned, idle_timeout_s, vram_reserved_mb)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (model_id, backend, image_tag, gpu_csv, tensor_parallel, max_model_len, dtype),
+        (
+            model_id, backend, image_tag, gpu_csv, tensor_parallel,
+            max_model_len, dtype,
+            1 if pinned else 0, idle_timeout_s, vram_reserved_mb,
+        ),
     )
-    return get_by_id(conn, cur.lastrowid)  # type: ignore[return-value]
+    result = get_by_id(conn, cur.lastrowid)
+    assert result is not None
+    return result
 
 
 def get_by_id(conn: sqlite3.Connection, dep_id: int) -> Deployment | None:
@@ -96,14 +114,16 @@ def set_container(
     container_id: str,
     container_name: str,
     container_port: int,
+    container_address: str,
 ) -> None:
     conn.execute(
         """
         UPDATE deployments
-        SET container_id=?, container_name=?, container_port=?, started_at=CURRENT_TIMESTAMP
+        SET container_id=?, container_name=?, container_port=?, container_address=?,
+            started_at=CURRENT_TIMESTAMP
         WHERE id=?
         """,
-        (container_id, container_name, container_port, dep_id),
+        (container_id, container_name, container_port, container_address, dep_id),
     )
 
 
@@ -119,3 +139,52 @@ def find_active(conn: sqlite3.Connection) -> Deployment | None:
 def list_all(conn: sqlite3.Connection) -> list[Deployment]:
     rows = conn.execute("SELECT * FROM deployments ORDER BY id").fetchall()
     return [_row_to_dep(r) for r in rows]
+
+
+def find_ready_by_model_name(conn: sqlite3.Connection, model_name: str) -> Deployment | None:
+    """Return the most-recently-loaded ready deployment for a model, or None."""
+    row = conn.execute(
+        """
+        SELECT d.* FROM deployments d
+        JOIN models m ON m.id = d.model_id
+        WHERE m.name = ? AND d.status = 'ready'
+        ORDER BY d.started_at DESC LIMIT 1
+        """,
+        (model_name,),
+    ).fetchone()
+    return _row_to_dep(row) if row else None
+
+
+def list_ready(conn: sqlite3.Connection) -> list[Deployment]:
+    """All deployments currently in 'ready' status."""
+    rows = conn.execute(
+        "SELECT * FROM deployments WHERE status = 'ready' ORDER BY id"
+    ).fetchall()
+    return [_row_to_dep(r) for r in rows]
+
+
+def list_evictable(conn: sqlite3.Connection) -> list[Deployment]:
+    """Non-pinned ready deployments, sorted oldest-touched first (LRU)."""
+    rows = conn.execute(
+        """
+        SELECT * FROM deployments
+        WHERE status = 'ready' AND pinned = 0
+        ORDER BY COALESCE(last_request_at, started_at) ASC
+        """
+    ).fetchall()
+    return [_row_to_dep(r) for r in rows]
+
+
+def touch_last_request(conn: sqlite3.Connection, dep_id: int) -> None:
+    """Update last_request_at to now. Called by the proxy on every request."""
+    conn.execute(
+        "UPDATE deployments SET last_request_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (dep_id,),
+    )
+
+
+def set_pinned(conn: sqlite3.Connection, dep_id: int, pinned: bool) -> None:
+    conn.execute(
+        "UPDATE deployments SET pinned = ? WHERE id = ?",
+        (1 if pinned else 0, dep_id),
+    )
