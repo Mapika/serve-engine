@@ -10,6 +10,7 @@ import structlog
 import uvicorn
 
 from serve_engine import config
+from serve_engine.backends.sglang import SGLangBackend
 from serve_engine.backends.vllm import VLLMBackend
 from serve_engine.daemon.app import build_apps
 from serve_engine.lifecycle.docker_client import DockerClient
@@ -47,10 +48,14 @@ async def serve(public_host: str, public_port: int, sock_path: Path) -> None:
         [list(topology.nvlink_island(g.index)) for g in topology.gpus],
     )
 
+    backends = {
+        "vllm": VLLMBackend(),
+        "sglang": SGLangBackend(),
+    }
     tcp_app, uds_app = build_apps(
         conn=conn,
         docker_client=docker_client,
-        backends={"vllm": VLLMBackend()},
+        backends=backends,
         models_dir=config.MODELS_DIR,
         topology=topology,
     )
