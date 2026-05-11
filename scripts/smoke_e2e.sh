@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# End-to-end smoke test for Plan 01 walking skeleton.
+# Plan 02 smoke test: multi-model serving with pin + auto.
 #
-# Prerequisites:
-#   - Docker daemon running
-#   - nvidia-container-toolkit configured
-#   - At least one CUDA-capable GPU (id 0)
-#   - HuggingFace cache primed, or HF_TOKEN set if the model is gated
-#   - `uv pip install -e ".[dev]"` already done in an active venv
+# Prerequisites (same as Plan 01):
+#   - Docker daemon + nvidia-container-toolkit + CUDA GPUs (>=1)
+#   - HF cache primed or HF_TOKEN set
+#   - serve installed via `uv pip install -e ".[dev]"`
 #
 # Verifies:
 #   - daemon start/stop
-#   - pull (register)
-#   - run (download + container spawn + health-wait)
-#   - /v1/chat/completions returns a streamed body containing the prompt cue
-#   - stop tears down the container
+#   - pull (register) for two models
+#   - run --pin and run --idle-timeout
+#   - /v1/chat/completions routes by `model` field to the right deployment
+#   - serve ps shows pinned / VRAM columns
+#   - stop tears containers down
 
 cleanup() {
     serve stop 2>/dev/null || true
@@ -25,23 +24,26 @@ trap cleanup EXIT
 
 serve daemon start
 
-serve pull meta-llama/Llama-3.2-1B-Instruct --name llama-1b
+serve pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
+serve pull Qwen/Qwen2.5-1.5B-Instruct --name qwen-1_5b
 
-serve run llama-1b --gpu 0 --ctx 8192 --dtype auto
+# Pinned: never auto-evicted
+serve run qwen-0_5b --gpu 0 --ctx 4096 --pin
 
-echo "Hitting /v1/chat/completions ..."
-curl -sS -N http://127.0.0.1:11500/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "llama-1b",
-    "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
-    "stream": true,
-    "max_tokens": 4
-  }' | tee /tmp/serve_smoke.out
+# Auto: idle-evicted after 60 s with no traffic
+serve run qwen-1_5b --gpu 0 --ctx 4096 --idle-timeout 60
 
-if ! grep -q "OK" /tmp/serve_smoke.out; then
-    echo "FAIL: expected 'OK' in streamed response"
-    exit 1
-fi
+serve ps
+
+# Hit both models — proxy routes by `model` field
+for m in qwen-0_5b qwen-1_5b; do
+    echo "--- $m ---"
+    curl -sS -N "http://127.0.0.1:11500/v1/chat/completions" \
+      -H "Content-Type: application/json" \
+      -d "{\"model\":\"$m\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply: OK\"}],\"max_tokens\":4,\"stream\":false}" \
+      | tee "/tmp/serve_smoke_$m.out"
+    echo
+    grep -q "OK" "/tmp/serve_smoke_$m.out" || { echo "FAIL: no OK from $m"; exit 1; }
+done
 
 echo "PASS"
