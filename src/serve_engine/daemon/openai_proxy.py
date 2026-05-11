@@ -68,56 +68,115 @@ async def _proxy(
     headers.pop("authorization", None)
     headers.pop("Authorization", None)
 
+    # Open the upstream stream BEFORE returning so we can read its status
+    # and headers and forward them faithfully to the caller.
     client = make_engine_client(base)
-    upstream = client.stream("POST", openai_subpath, content=body, headers=headers)
+    stream_cm = client.stream("POST", openai_subpath, content=body, headers=headers)
+    resp = await stream_cm.__aenter__()
 
-    captured = bytearray()
+    # Forward upstream status + content-type + selected headers.
+    upstream_ct = resp.headers.get("content-type", "application/octet-stream")
+    forward_headers = {
+        k: v for k, v in resp.headers.items()
+        if k.lower() not in _HOP_BY_HOP | {"content-type"}
+    }
+
+    # Track only the last SSE event's `data:` payload, or the entire body if
+    # it's a single JSON object. ~4 KB cap on the last-line buffer is plenty
+    # for usage payloads which are tens of bytes.
+    usage_tracker = _UsageTracker(is_sse="event-stream" in upstream_ct)
 
     async def streamer():
         try:
-            async with upstream as resp:
-                async for chunk in resp.aiter_raw():
-                    captured.extend(chunk)
-                    yield chunk
+            async for chunk in resp.aiter_raw():
+                usage_tracker.feed(chunk)
+                yield chunk
         finally:
+            await stream_cm.__aexit__(None, None, None)
             await client.aclose()
             if key is not None:
-                tin, tout = _extract_usage(bytes(captured))
+                tin, tout = usage_tracker.extract()
                 _key_usage_store.record(
                     conn, key_id=key.id, tokens_in=tin, tokens_out=tout,
                     model_name=model_name,
                 )
 
-    return StreamingResponse(streamer(), media_type="text/event-stream")
+    return StreamingResponse(
+        streamer(),
+        status_code=resp.status_code,
+        headers=forward_headers,
+        media_type=upstream_ct,
+    )
 
 
-def _extract_usage(body: bytes) -> tuple[int, int]:
-    """Best-effort token-count extraction from OpenAI-format response or SSE."""
-    if not body:
-        return 0, 0
-    text = body.decode(errors="replace")
-    # Try non-streaming JSON first.
-    try:
-        obj = json.loads(text)
-        if isinstance(obj, dict):
-            usage = obj.get("usage") or {}
-            return int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0))
-    except json.JSONDecodeError:
-        pass
-    # SSE: vLLM/SGLang emit a final `data: { ... "usage": {...} ...}` chunk for streams
-    # that opt in via stream_options.include_usage=true.
-    for line in reversed(text.splitlines()):
-        if line.startswith("data:") and "usage" in line:
-            payload = line[len("data:"):].strip()
-            if payload == "[DONE]":
-                continue
-            try:
-                obj = json.loads(payload)
-                usage = obj.get("usage") or {}
-                return int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0))
-            except json.JSONDecodeError:
-                continue
-    return 0, 0
+class _UsageTracker:
+    """Best-effort token-count extraction without buffering the full response.
+
+    - SSE mode: keep the last complete `data: {...}` event; OpenAI/vLLM/SGLang
+      emit usage in the final event when stream_options.include_usage=true.
+    - JSON mode: buffer up to a small cap (single JSON response). Most non-
+      streaming `/v1/chat/completions` bodies are well under 64 KB.
+    """
+
+    _MAX_JSON = 65_536
+
+    def __init__(self, *, is_sse: bool):
+        self._is_sse = is_sse
+        self._last_event = bytearray()
+        self._current = bytearray()
+        self._json_buf = bytearray()
+        self._json_overflow = False
+
+    def feed(self, chunk: bytes) -> None:
+        if self._is_sse:
+            self._current.extend(chunk)
+            # An event ends with a blank line (\n\n). When we see one,
+            # the bytes before the blank line are the most recent event.
+            while True:
+                idx = self._current.find(b"\n\n")
+                if idx < 0:
+                    break
+                event = bytes(self._current[:idx])
+                del self._current[: idx + 2]
+                if b"data:" in event:
+                    self._last_event = bytearray(event)
+        else:
+            if not self._json_overflow:
+                remaining = self._MAX_JSON - len(self._json_buf)
+                if remaining <= 0:
+                    self._json_overflow = True
+                else:
+                    self._json_buf.extend(chunk[:remaining])
+                    if len(chunk) > remaining:
+                        self._json_overflow = True
+
+    def extract(self) -> tuple[int, int]:
+        if self._is_sse:
+            payload = self._last_event
+            if not payload:
+                return 0, 0
+            # Strip lines that don't start with `data:`
+            for line in payload.split(b"\n"):
+                if line.startswith(b"data:"):
+                    body = line[len(b"data:"):].strip()
+                    if body == b"[DONE]" or not body:
+                        continue
+                    try:
+                        obj = json.loads(body)
+                        u = obj.get("usage") or {}
+                        return int(u.get("prompt_tokens", 0)), int(u.get("completion_tokens", 0))
+                    except (json.JSONDecodeError, AttributeError):
+                        continue
+            return 0, 0
+        # JSON mode
+        if self._json_overflow or not self._json_buf:
+            return 0, 0
+        try:
+            obj = json.loads(bytes(self._json_buf))
+            u = obj.get("usage") or {}
+            return int(u.get("prompt_tokens", 0)), int(u.get("completion_tokens", 0))
+        except (json.JSONDecodeError, AttributeError):
+            return 0, 0
 
 
 @router.post("/v1/chat/completions")

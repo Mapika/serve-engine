@@ -179,3 +179,74 @@ async def test_proxy_400_when_no_model_field(app_with_active_deployment):
             json={"messages": []},
         )
     assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_proxy_forwards_upstream_500(tmp_path, monkeypatch):
+    """Engine returns 500 → proxy must return 500 (not silently 200)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from serve_engine.backends.vllm import VLLMBackend
+    from serve_engine.lifecycle.docker_client import ContainerHandle
+    from serve_engine.lifecycle.topology import GPUInfo, Topology
+
+    fake_engine = FakeEngineApp([b'{"error":"cuda oom"}'], status_code=500)
+    def fake_async_client_factory(base_url):
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=fake_engine),
+            base_url="http://engine",
+        )
+    monkeypatch.setattr(
+        "serve_engine.daemon.openai_proxy.make_engine_client",
+        fake_async_client_factory,
+    )
+    monkeypatch.setattr(
+        "serve_engine.lifecycle.manager.wait_healthy",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        "serve_engine.lifecycle.manager.download_model_async",
+        AsyncMock(return_value=str(tmp_path / "w")),
+    )
+    monkeypatch.setattr(
+        "serve_engine.lifecycle.manager.estimate_vram_mb",
+        lambda inp: 20_000,
+    )
+    (tmp_path / "w").mkdir(exist_ok=True)
+
+    docker_client = MagicMock()
+    docker_client.run.return_value = ContainerHandle(
+        id="cid", name="engine", address="127.0.0.1", port=8000,
+    )
+    conn = db.connect(tmp_path / "t.db")
+    db.init_schema(conn)
+    topology = Topology(
+        gpus=[GPUInfo(index=0, name="H100", total_mb=80 * 1024)],
+        _islands={0: frozenset({0})},
+    )
+    app = build_app(
+        conn=conn, docker_client=docker_client,
+        backends={"vllm": VLLMBackend()}, models_dir=tmp_path, topology=topology,
+    )
+
+    # Set up a deployment
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        r = await c.post("/admin/deployments", json={
+            "model_name": "llama-1b",
+            "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
+            "image_tag": "img:v1",
+            "gpu_ids": [0],
+            "max_model_len": 8192,
+        })
+        assert r.status_code == 201
+
+        # Now the proxy hit should return 500, not 200
+        r = await c.post(
+            "/v1/chat/completions",
+            json={"model": "llama-1b", "messages": [{"role":"user","content":"hi"}]},
+        )
+    assert r.status_code == 500
+    assert b"cuda oom" in r.content
