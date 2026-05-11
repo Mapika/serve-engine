@@ -26,6 +26,9 @@ class DeploymentPlan:
     enable_prefix_caching: bool = True
     enable_chunked_prefill: bool = True
     extra_args: dict[str, str] = field(default_factory=dict)
+    pinned: bool = False
+    idle_timeout_s: int | None = None
+    target_concurrency: int = 8  # used by KV estimator
 
     def __post_init__(self) -> None:
         if self.backend not in SUPPORTED_BACKENDS:
