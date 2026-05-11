@@ -18,5 +18,6 @@ from serve_engine.cli import (  # noqa: E402
     pull_cmd,  # noqa: F401  registers command
     run_cmd,  # noqa: F401  registers command
     stop_cmd,  # noqa: F401  registers command
+    top_cmd,  # noqa: F401  registers command
     unpin_cmd,  # noqa: F401  registers command
 )
