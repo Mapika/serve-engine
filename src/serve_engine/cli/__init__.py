@@ -9,6 +9,7 @@ app = typer.Typer(
 )
 
 from serve_engine.cli import (  # noqa: E402
+    daemon_cmd,  # noqa: F401  registers `daemon` sub-app
     logs_cmd,  # noqa: F401  registers command
     ls_cmd,  # noqa: F401  registers command
     ps_cmd,  # noqa: F401  registers command
