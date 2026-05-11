@@ -35,7 +35,9 @@ async def _proxy(request: Request, openai_subpath: str) -> StreamingResponse:
     if backend is None:
         raise HTTPException(500, detail=f"unknown backend {active.backend!r}")
 
-    base = f"http://{active.container_name}:{active.container_port}{backend.openai_base}"
+    # Engine containers publish their port on 127.0.0.1 via the C1 fix.
+    # Plan 02 should add a container_address column for clarity.
+    base = f"http://127.0.0.1:{active.container_port}{backend.openai_base}"
     body = await request.body()
     _HOP_BY_HOP = {"host", "content-length", "transfer-encoding", "connection"}
     headers = {
