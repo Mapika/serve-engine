@@ -18,6 +18,11 @@ def run(
     max_model_len: int = typer.Option(8192, "--ctx"),
     dtype: str = typer.Option("auto"),
     image_tag: str = typer.Option(None, "--image", help="Override engine image tag"),
+    pin: bool = typer.Option(False, "--pin", help="Make this deployment unevictable"),
+    idle_timeout_s: int = typer.Option(
+        None, "--idle-timeout",
+        help="Seconds idle before auto-eviction (default: server config)",
+    ),
 ):
     """Load a model and make it active. Stops the current model first."""
     gpu_ids = [int(g) for g in gpu.split(",") if g.strip()]
@@ -44,6 +49,9 @@ def run(
         "max_model_len": max_model_len,
         "dtype": dtype,
     }
+    body["pinned"] = pin
+    if idle_timeout_s is not None:
+        body["idle_timeout_s"] = idle_timeout_s
     if image_tag is not None:
         body["image_tag"] = image_tag
 
