@@ -47,5 +47,5 @@ class DeploymentPlan:
                 "tensor_parallel must equal len(gpu_ids); "
                 f"got TP={self.tensor_parallel}, gpus={self.gpu_ids}"
             )
-        if not 0.1 <= self.gpu_memory_utilization <= 1.0:
-            raise ValueError("gpu_memory_utilization must be in [0.1, 1.0]")
+        if not 0.05 <= self.gpu_memory_utilization <= 1.0:
+            raise ValueError("gpu_memory_utilization must be in [0.05, 1.0]")
