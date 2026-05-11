@@ -222,6 +222,50 @@ async def test_create_list_revoke_key(app):
 
 
 @pytest.mark.asyncio
+async def test_download_model_endpoint(app, monkeypatch, tmp_path):
+    """POST /admin/models/{name}/download invokes the downloader."""
+    captured = {}
+
+    def fake_download_model(*, hf_repo, revision, cache_dir, on_event=None):
+        captured["hf_repo"] = hf_repo
+        captured["revision"] = revision
+        path = tmp_path / "fake_weights"
+        path.mkdir(exist_ok=True)
+        return str(path)
+
+    monkeypatch.setattr(
+        "serve_engine.lifecycle.downloader.download_model",
+        fake_download_model,
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        # Register first
+        r = await c.post("/admin/models", json={"name": "x", "hf_repo": "org/x"})
+        assert r.status_code == 201
+        # Trigger download
+        r = await c.post("/admin/models/x/download")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["name"] == "x"
+        assert body["local_path"].endswith("fake_weights")
+        assert body["already_present"] is False
+
+        # Second call returns already_present=True
+        r = await c.post("/admin/models/x/download")
+        assert r.json()["already_present"] is True
+
+
+@pytest.mark.asyncio
+async def test_download_unknown_model_404(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post("/admin/models/no-such/download")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_admin_route_requires_admin_tier(tmp_path, monkeypatch):
     """When non-admin keys exist, admin routes return 403 unless the bearer is admin."""
     from serve_engine.backends.vllm import VLLMBackend

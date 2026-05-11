@@ -173,6 +173,37 @@ def create_model(
     return asdict(m)
 
 
+@router.post("/models/{name}/download")
+async def download_model_endpoint(
+    name: str,
+    manager: LifecycleManager = Depends(get_manager),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Synchronously download a registered model's weights to the local cache.
+
+    Returns when the download completes (or raises 5xx if it fails).
+    The CLI's `serve pull` calls this after registering; clients should
+    expect potentially many minutes for large models.
+    """
+    m = model_store.get_by_name(conn, name)
+    if m is None:
+        raise HTTPException(404, f"model {name!r} not registered")
+    if m.local_path is not None:
+        return {"name": m.name, "local_path": m.local_path, "already_present": True}
+    from serve_engine.lifecycle.downloader import download_model
+    try:
+        local_path = await asyncio.to_thread(
+            download_model,
+            hf_repo=m.hf_repo,
+            revision=m.revision,
+            cache_dir=manager._models_dir,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"download failed: {e}") from e
+    model_store.set_local_path(conn, m.id, local_path)
+    return {"name": m.name, "local_path": local_path, "already_present": False}
+
+
 @router.delete("/models/{name}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_model(name: str, conn: sqlite3.Connection = Depends(get_conn)):
     m = model_store.get_by_name(conn, name)
