@@ -4,8 +4,9 @@ import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-import docker  # type: ignore[import-untyped]
 from docker.errors import NotFound  # type: ignore[import-untyped]
+
+import docker  # type: ignore[import-untyped]
 
 log = logging.getLogger(__name__)
 
