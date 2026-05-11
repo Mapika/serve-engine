@@ -41,6 +41,7 @@ packages = ["src/serve_engine"]
 "src/serve_engine/backends/backends.yaml" = "serve_engine/backends/backends.yaml"
 "src/serve_engine/backends/selection.yaml" = "serve_engine/backends/selection.yaml"
 "src/serve_engine/auth/tiers.yaml" = "serve_engine/auth/tiers.yaml"
+"src/serve_engine/ui" = "serve_engine/ui"
 
 [tool.ruff]
 line-length = 100
