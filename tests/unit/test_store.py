@@ -2,6 +2,7 @@
 import pytest
 
 from serve_engine.store import db
+from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
 
 
@@ -76,3 +77,61 @@ def test_set_local_path(tmp_path):
     model_store.set_local_path(conn, m.id, "/var/x")
     fetched = model_store.get_by_name(conn, "x")
     assert fetched.local_path == "/var/x"
+
+
+def test_create_deployment(tmp_path):
+    conn = _fresh(tmp_path)
+    m = model_store.add(conn, name="x", hf_repo="org/x")
+    d = dep_store.create(
+        conn,
+        model_id=m.id,
+        backend="vllm",
+        image_tag="vllm/vllm-openai:v0.7.3",
+        gpu_ids=[0],
+        tensor_parallel=1,
+        max_model_len=8192,
+        dtype="bf16",
+    )
+    assert d.id is not None
+    assert d.status == "pending"
+    assert d.gpu_ids == [0]
+
+
+def test_update_deployment_status(tmp_path):
+    conn = _fresh(tmp_path)
+    m = model_store.add(conn, name="x", hf_repo="org/x")
+    d = dep_store.create(
+        conn, model_id=m.id, backend="vllm", image_tag="img:v1",
+        gpu_ids=[0], tensor_parallel=1, max_model_len=8192, dtype="auto",
+    )
+    dep_store.update_status(conn, d.id, "loading")
+    refreshed = dep_store.get_by_id(conn, d.id)
+    assert refreshed.status == "loading"
+
+
+def test_set_container_info(tmp_path):
+    conn = _fresh(tmp_path)
+    m = model_store.add(conn, name="x", hf_repo="org/x")
+    d = dep_store.create(
+        conn, model_id=m.id, backend="vllm", image_tag="img:v1",
+        gpu_ids=[0], tensor_parallel=1, max_model_len=8192, dtype="auto",
+    )
+    dep_store.set_container(
+        conn, d.id, container_id="abc", container_name="vllm-x", container_port=8000
+    )
+    refreshed = dep_store.get_by_id(conn, d.id)
+    assert refreshed.container_id == "abc"
+    assert refreshed.container_port == 8000
+
+
+def test_find_active(tmp_path):
+    conn = _fresh(tmp_path)
+    m = model_store.add(conn, name="x", hf_repo="org/x")
+    assert dep_store.find_active(conn) is None
+    d = dep_store.create(
+        conn, model_id=m.id, backend="vllm", image_tag="img:v1",
+        gpu_ids=[0], tensor_parallel=1, max_model_len=8192, dtype="auto",
+    )
+    dep_store.update_status(conn, d.id, "ready")
+    found = dep_store.find_active(conn)
+    assert found is not None and found.id == d.id
