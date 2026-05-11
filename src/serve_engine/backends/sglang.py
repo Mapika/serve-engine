@@ -18,7 +18,11 @@ class SGLangBackend:
     internal_port: ClassVar[int] = INTERNAL_PORT
 
     def build_argv(self, plan: DeploymentPlan, *, local_model_path: str) -> list[str]:
+        # The lmsysorg/sglang image's ENTRYPOINT is nvidia_entrypoint.sh which
+        # `exec`s its argv. Unlike vLLM's image, it does NOT embed the launcher,
+        # so we must include `python3 -m sglang.launch_server` ourselves.
         argv: list[str] = [
+            "python3", "-m", "sglang.launch_server",
             "--model-path", local_model_path,
             "--tp", str(plan.tensor_parallel),
             "--context-length", str(plan.max_model_len),

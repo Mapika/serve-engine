@@ -18,6 +18,11 @@ def _plan(**overrides):
 
 def test_build_argv_minimum():
     argv = SGLangBackend().build_argv(_plan(), local_model_path="/models/llama-1b")
+    # The argv prepends the launcher because the SGLang image's ENTRYPOINT
+    # is nvidia_entrypoint.sh (no embedded launcher).
+    assert argv[0] == "python3"
+    assert argv[1] == "-m"
+    assert argv[2] == "sglang.launch_server"
     assert "--model-path" in argv
     assert argv[argv.index("--model-path") + 1] == "/models/llama-1b"
     assert "--tp" in argv
