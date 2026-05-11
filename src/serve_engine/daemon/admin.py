@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.responses import StreamingResponse as _SSE
 from pydantic import BaseModel
 
+from serve_engine.auth.middleware import require_auth_dep
 from serve_engine.backends.base import Backend
 from serve_engine.lifecycle.manager import LifecycleManager
 from serve_engine.lifecycle.plan import DeploymentPlan
@@ -18,7 +19,23 @@ from serve_engine.store import api_keys as _ak_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
 
-router = APIRouter(prefix="/admin")
+
+def require_admin_key(
+    request: Request,
+    key: _ak_store.ApiKey | None = Depends(require_auth_dep),
+) -> _ak_store.ApiKey | None:
+    """Pass through if no keys exist (homelab bypass), else require tier=admin."""
+    if key is None:
+        return None
+    if key.tier != "admin":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="admin tier required for /admin/*",
+        )
+    return key
+
+
+router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin_key)])
 
 
 def get_manager(request: Request) -> LifecycleManager:

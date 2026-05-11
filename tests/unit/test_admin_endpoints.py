@@ -198,20 +198,78 @@ async def test_list_gpus_returns_list(app, monkeypatch):
 async def test_create_list_revoke_key(app):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
-        r = await c.post("/admin/keys", json={"name": "alice", "tier": "standard"})
+        # Create admin key first (bypass is active at this point — no keys exist yet)
+        r = await c.post("/admin/keys", json={"name": "alice", "tier": "admin"})
         assert r.status_code == 201
         body = r.json()
         assert body["secret"].startswith("sk-")
         kid = body["id"]
+        secret = body["secret"]
+        auth = {"Authorization": f"Bearer {secret}"}
 
-        r = await c.get("/admin/keys")
+        # Now a key exists — all subsequent admin requests must carry the bearer
+        r = await c.get("/admin/keys", headers=auth)
         assert r.status_code == 200
         names = [k["name"] for k in r.json()]
         assert "alice" in names
 
-        r = await c.delete(f"/admin/keys/{kid}")
+        r = await c.delete(f"/admin/keys/{kid}", headers=auth)
         assert r.status_code == 204
 
-        r = await c.get("/admin/keys")
+        r = await c.get("/admin/keys", headers=auth)
         revoked = [k for k in r.json() if k["id"] == kid]
         assert revoked[0]["revoked"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_route_requires_admin_tier(tmp_path, monkeypatch):
+    """When non-admin keys exist, admin routes return 403 unless the bearer is admin."""
+    from serve_engine.backends.vllm import VLLMBackend
+    from serve_engine.daemon.app import build_app
+    from serve_engine.lifecycle.docker_client import ContainerHandle
+    from serve_engine.lifecycle.topology import GPUInfo, Topology
+    from serve_engine.store import api_keys as _ak
+    from serve_engine.store import db as _db
+
+    monkeypatch.setattr(
+        "serve_engine.lifecycle.manager.estimate_vram_mb",
+        lambda inp: 20_000,
+    )
+    (tmp_path / "weights").mkdir(exist_ok=True)
+    docker_client = MagicMock()
+    docker_client.run.return_value = ContainerHandle(
+        id="cid", name="x", address="127.0.0.1", port=49152,
+    )
+    conn = _db.connect(tmp_path / "t.db")
+    _db.init_schema(conn)
+    # Create a standard-tier key so the bypass is off
+    std_secret, _ = _ak.create(conn, name="user", tier="standard")
+    admin_secret, _ = _ak.create(conn, name="root", tier="admin")
+    topology = Topology(
+        gpus=[GPUInfo(index=0, name="H100", total_mb=80 * 1024)],
+        _islands={0: frozenset({0})},
+    )
+    app = build_app(
+        conn=conn, docker_client=docker_client,
+        backends={"vllm": VLLMBackend()}, models_dir=tmp_path, topology=topology,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        # No bearer → 401
+        r = await c.get("/admin/models")
+        assert r.status_code == 401
+
+        # Standard-tier bearer → 403
+        r = await c.get(
+            "/admin/models",
+            headers={"Authorization": f"Bearer {std_secret}"},
+        )
+        assert r.status_code == 403
+
+        # Admin-tier bearer → 200
+        r = await c.get(
+            "/admin/models",
+            headers={"Authorization": f"Bearer {admin_secret}"},
+        )
+        assert r.status_code == 200

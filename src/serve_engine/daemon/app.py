@@ -64,6 +64,7 @@ def build_apps(
     _attach_state(tcp_app, conn=conn, backends=backends, manager=manager, event_bus=event_bus)
     tcp_app.include_router(openai_router)
     tcp_app.include_router(metrics_router)
+    tcp_app.include_router(admin_router)
     ui_router = make_ui_router()
     if ui_router is not None:
         tcp_app.include_router(ui_router)
