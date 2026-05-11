@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import httpx
@@ -24,21 +25,32 @@ async def _proxy(request: Request, openai_subpath: str) -> StreamingResponse:
     conn: sqlite3.Connection = request.app.state.conn
     backends: dict[str, Backend] = request.app.state.backends
 
-    active = dep_store.find_active(conn)
-    if active is None or active.status != "ready":
+    body = await request.body()
+    model_name: str | None = None
+    try:
+        parsed = json.loads(body) if body else {}
+        if isinstance(parsed, dict):
+            model_name = parsed.get("model")
+    except json.JSONDecodeError:
+        pass
+
+    if not model_name:
+        raise HTTPException(400, detail="request body must include 'model'")
+
+    active = dep_store.find_ready_by_model_name(conn, model_name)
+    if active is None or active.container_address is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="no active deployment ready to serve",
+            detail=f"no ready deployment for model {model_name!r}",
         )
 
     backend = backends.get(active.backend)
     if backend is None:
         raise HTTPException(500, detail=f"unknown backend {active.backend!r}")
 
-    # Engine containers publish their port on 127.0.0.1 via the C1 fix.
-    # Plan 02 should add a container_address column for clarity.
-    base = f"http://127.0.0.1:{active.container_port}{backend.openai_base}"
-    body = await request.body()
+    dep_store.touch_last_request(conn, active.id)
+
+    base = f"http://{active.container_address}:{active.container_port}{backend.openai_base}"
     _HOP_BY_HOP = {"host", "content-length", "transfer-encoding", "connection"}
     headers = {
         k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP
@@ -76,7 +88,9 @@ async def embeddings(request: Request):
 @router.get("/v1/models")
 def models(request: Request):
     conn: sqlite3.Connection = request.app.state.conn
-    active = dep_store.find_active(conn)
+    ready_by_model: dict[int, dep_store.Deployment] = {}
+    for d in dep_store.list_ready(conn):
+        ready_by_model[d.model_id] = d
     rows = model_store.list_all(conn)
     return {
         "object": "list",
@@ -85,11 +99,8 @@ def models(request: Request):
                 "id": m.name,
                 "object": "model",
                 "owned_by": "serve-engine",
-                "loaded": (
-                    active is not None
-                    and active.model_id == m.id
-                    and active.status == "ready"
-                ),
+                "loaded": m.id in ready_by_model,
+                "pinned": ready_by_model[m.id].pinned if m.id in ready_by_model else False,
             }
             for m in rows
         ],

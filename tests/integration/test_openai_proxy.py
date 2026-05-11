@@ -149,4 +149,33 @@ async def test_proxy_503_when_no_active(tmp_path, monkeypatch):
             json={"model": "llama-1b", "messages": []},
         )
     assert r.status_code == 503
-    assert "no active deployment" in r.json()["detail"]
+    assert "no ready deployment" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_proxy_routes_by_model_name(app_with_active_deployment):
+    app, _ = app_with_active_deployment
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        r = await c.post(
+            "/v1/chat/completions",
+            json={"model": "no-such-model", "messages": []},
+        )
+    assert r.status_code == 503
+    assert "no ready deployment" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_proxy_400_when_no_model_field(app_with_active_deployment):
+    app, _ = app_with_active_deployment
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        r = await c.post(
+            "/v1/chat/completions",
+            json={"messages": []},
+        )
+    assert r.status_code == 400
