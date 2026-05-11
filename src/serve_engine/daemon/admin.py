@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json as _json
 import sqlite3
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse as _SSE
 from pydantic import BaseModel
 
 from serve_engine.backends.base import Backend
@@ -232,3 +235,24 @@ def revoke_key(
     if _ak_store.get_by_id(conn, key_id) is None:
         raise HTTPException(404, f"no key with id {key_id}")
     _ak_store.revoke(conn, key_id)
+
+
+@router.get("/events")
+async def events(request: Request) -> _SSE:
+    """SSE: lifecycle events as `data: <json>\n\n` chunks. Heartbeat every 15s."""
+    bus = request.app.state.event_bus
+
+    async def gen():
+        async with bus.subscribe() as queue:
+            yield ":ok\n\n"  # initial heartbeat
+            while True:
+                try:
+                    e = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    payload = _json.dumps({
+                        "kind": e.kind, "payload": e.payload, "ts": e.ts,
+                    })
+                    yield f"data: {payload}\n\n"
+                except TimeoutError:
+                    yield ":hb\n\n"  # SSE comment heartbeat
+
+    return _SSE(gen(), media_type="text/event-stream")

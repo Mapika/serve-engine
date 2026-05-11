@@ -21,6 +21,7 @@ from serve_engine.lifecycle.placement import (
 )
 from serve_engine.lifecycle.plan import DeploymentPlan
 from serve_engine.lifecycle.topology import Topology
+from serve_engine.observability.events import Event, EventBus
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
 
@@ -57,6 +58,7 @@ class LifecycleManager:
         models_dir: Path,
         topology: Topology | None = None,
         load_timeout_s: float = 600.0,
+        event_bus: EventBus | None = None,
     ):
         self._conn = conn
         self._docker = docker_client
@@ -64,7 +66,12 @@ class LifecycleManager:
         self._models_dir = models_dir
         self._topology = topology
         self._load_timeout_s = load_timeout_s
+        self._events = event_bus
         self._lock = asyncio.Lock()
+
+    async def _emit(self, kind: str, **payload) -> None:
+        if self._events is not None:
+            await self._events.publish(Event(kind=kind, payload=payload))
 
     @property
     def docker(self) -> DockerClient:
@@ -163,6 +170,12 @@ class LifecycleManager:
                 vram_reserved_mb=vram_mb,
             )
             dep_store.update_status(self._conn, dep.id, "loading")
+            await self._emit(
+                "deployment.loading",
+                dep_id=dep.id,
+                model=plan.model_name,
+                backend=plan.backend,
+            )
 
             backend = self._backends[plan.backend]
             container_model_path = "/cache/" + str(
@@ -211,6 +224,7 @@ class LifecycleManager:
                 container_port=handle.port,
                 container_address=handle.address,
             )
+            await self._emit("deployment.spawned", dep_id=dep.id, container_id=handle.id)
 
             health_url = f"http://{handle.address}:{handle.port}{backend.health_path}"
             ok = await wait_healthy(health_url, timeout_s=self._load_timeout_s)
@@ -218,9 +232,11 @@ class LifecycleManager:
                 self._docker.stop(handle.id, timeout=10)
                 msg = f"engine did not become healthy within load timeout ({health_url})"
                 dep_store.update_status(self._conn, dep.id, "failed", last_error=msg)
+                await self._emit("deployment.failed", dep_id=dep.id, error=msg)
                 raise RuntimeError(msg)
 
             dep_store.update_status(self._conn, dep.id, "ready")
+            await self._emit("deployment.ready", dep_id=dep.id)
             return dep_store.get_by_id(self._conn, dep.id)
 
     async def stop(self, dep_id: int | None = None) -> None:
@@ -233,6 +249,7 @@ class LifecycleManager:
 
     async def pin(self, dep_id: int, pinned: bool = True) -> None:
         dep_store.set_pinned(self._conn, dep_id, pinned)
+        await self._emit("deployment.pinned" if pinned else "deployment.unpinned", dep_id=dep_id)
 
     async def _stop_locked(self, dep_id: int) -> None:
         dep = dep_store.get_by_id(self._conn, dep_id)
@@ -242,3 +259,4 @@ class LifecycleManager:
         if dep.container_id:
             self._docker.stop(dep.container_id, timeout=30)
         dep_store.update_status(self._conn, dep.id, "stopped")
+        await self._emit("deployment.stopped", dep_id=dep_id)

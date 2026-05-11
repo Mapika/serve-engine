@@ -13,6 +13,7 @@ from serve_engine.daemon.openai_proxy import router as openai_router
 from serve_engine.lifecycle.docker_client import DockerClient
 from serve_engine.lifecycle.manager import LifecycleManager
 from serve_engine.lifecycle.topology import Topology
+from serve_engine.observability.events import EventBus
 
 
 def _attach_state(
@@ -21,10 +22,12 @@ def _attach_state(
     conn: sqlite3.Connection,
     backends: dict[str, Backend],
     manager: LifecycleManager,
+    event_bus: EventBus,
 ) -> None:
     app.state.conn = conn
     app.state.backends = backends
     app.state.manager = manager
+    app.state.event_bus = event_bus
     app.state.tier_cfg = load_tiers()
     app.state.request_count = 0
 
@@ -46,16 +49,18 @@ def build_apps(
     - tcp_app: public OpenAI-compatible API only. No admin routes.
     - uds_app: full surface (admin + OpenAI) for the local CLI / future UI.
     """
+    event_bus = EventBus()
     manager = LifecycleManager(
         conn=conn,
         docker_client=docker_client,
         backends=backends,
         models_dir=models_dir,
         topology=topology,
+        event_bus=event_bus,
     )
 
     tcp_app = FastAPI(title="serve-engine (public)", version="0.0.1")
-    _attach_state(tcp_app, conn=conn, backends=backends, manager=manager)
+    _attach_state(tcp_app, conn=conn, backends=backends, manager=manager, event_bus=event_bus)
     tcp_app.include_router(openai_router)
     tcp_app.include_router(metrics_router)
 
@@ -67,7 +72,7 @@ def build_apps(
     )
 
     uds_app = FastAPI(title="serve-engine (control)", version="0.0.1")
-    _attach_state(uds_app, conn=conn, backends=backends, manager=manager)
+    _attach_state(uds_app, conn=conn, backends=backends, manager=manager, event_bus=event_bus)
     uds_app.include_router(openai_router)
     uds_app.include_router(admin_router)
     uds_app.include_router(metrics_router)
