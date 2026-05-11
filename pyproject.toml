@@ -11,6 +11,7 @@ dependencies = [
     "docker>=7.1",
     "huggingface_hub>=0.24",
     "pydantic>=2.7",
+    "pyyaml>=6.0",
     "structlog>=24.1",
     "pynvml>=11.5",
 ]
@@ -37,6 +38,8 @@ packages = ["src/serve_engine"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/serve_engine/store/migrations" = "serve_engine/store/migrations"
+"src/serve_engine/backends/backends.yaml" = "serve_engine/backends/backends.yaml"
+"src/serve_engine/backends/selection.yaml" = "serve_engine/backends/selection.yaml"
 
 [tool.ruff]
 line-length = 100

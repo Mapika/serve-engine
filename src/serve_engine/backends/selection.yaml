@@ -1,0 +1,16 @@
+# Model-pattern → preferred backend. First match wins.
+# Patterns are case-insensitive fnmatch globs.
+#
+# Defaults to vLLM unless a rule matches. Override per-request with `--engine`.
+
+rules:
+  # Models that benefit from RadixAttention (multi-turn / agentic / long
+  # shared prefixes). SGLang's prefix caching is more aggressive than vLLM's.
+  - pattern: "*deepseek-v3*"
+    backend: sglang
+  - pattern: "*deepseek-r1*"
+    backend: sglang
+  - pattern: "*qwen*-vl*"
+    backend: sglang   # vision-language; SGLang handles these well
+
+default: vllm
