@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -75,3 +76,42 @@ async def test_reaper_skips_when_last_request_at_none():
     )
     await reaper.tick_once()
     manager.stop.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reaper_evicts_after_real_time_idle(monkeypatch):
+    """End-to-end timing test: reaper, started normally, evicts within tick_s."""
+    now_seq = [1_000_000]
+
+    def fake_now():
+        return now_seq[0]
+
+    # Two deployments: id=1 has idle_timeout_s=1, id=2 has idle_timeout_s=10
+    deployments = [
+        MagicMock(id=1, pinned=False, idle_timeout_s=1,
+                  last_request_at=now_seq[0] - 0.5, status="ready"),
+        MagicMock(id=2, pinned=False, idle_timeout_s=10,
+                  last_request_at=now_seq[0] - 0.5, status="ready"),
+    ]
+
+    manager = MagicMock()
+    manager.stop = AsyncMock()
+
+    reaper = Reaper(
+        manager=manager,
+        list_ready=MagicMock(return_value=deployments),
+        default_idle_timeout_s=300,
+        tick_s=0.2,           # tick every 200 ms
+        now_fn=fake_now,
+    )
+    reaper.start()
+    # Advance virtual time past id=1's 1 s timeout
+    await asyncio.sleep(0.3)
+    now_seq[0] += 2
+    await asyncio.sleep(0.3)
+    await reaper.stop()
+
+    # id=1 should be evicted, id=2 not
+    manager.stop.assert_any_call(1)
+    for call in manager.stop.call_args_list:
+        assert call.args[0] != 2
