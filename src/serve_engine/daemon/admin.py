@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from serve_engine.backends.base import Backend
 from serve_engine.lifecycle.manager import LifecycleManager
 from serve_engine.lifecycle.plan import DeploymentPlan
+from serve_engine.store import api_keys as _ak_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
 
@@ -173,3 +174,61 @@ def stream_current_logs(request: Request):
                 yield chunk.encode()
 
     return StreamingResponse(gen(), media_type="text/plain")
+
+
+class CreateKeyRequest(BaseModel):
+    name: str
+    tier: str = "standard"
+    rpm_override: int | None = None
+    tpm_override: int | None = None
+    rph_override: int | None = None
+    tph_override: int | None = None
+    rpd_override: int | None = None
+    tpd_override: int | None = None
+    rpw_override: int | None = None
+    tpw_override: int | None = None
+
+
+@router.get("/keys")
+def list_keys(conn: sqlite3.Connection = Depends(get_conn)):
+    return [
+        {
+            "id": k.id,
+            "name": k.name,
+            "prefix": k.prefix,
+            "tier": k.tier,
+            "revoked": k.revoked_at is not None,
+        }
+        for k in _ak_store.list_all(conn)
+    ]
+
+
+@router.post("/keys", status_code=status.HTTP_201_CREATED)
+def create_key(
+    body: CreateKeyRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    secret, k = _ak_store.create(
+        conn, name=body.name, tier=body.tier,
+        rpm_override=body.rpm_override, tpm_override=body.tpm_override,
+        rph_override=body.rph_override, tph_override=body.tph_override,
+        rpd_override=body.rpd_override, tpd_override=body.tpd_override,
+        rpw_override=body.rpw_override, tpw_override=body.tpw_override,
+    )
+    return {
+        "id": k.id,
+        "name": k.name,
+        "prefix": k.prefix,
+        "tier": k.tier,
+        "secret": secret,
+    }
+
+
+@router.delete("/keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_key(
+    key_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    if _ak_store.get_by_id(conn, key_id) is None:
+        raise HTTPException(404, f"no key with id {key_id}")
+    _ak_store.revoke(conn, key_id)

@@ -173,3 +173,26 @@ async def test_create_deployment_default_backend_is_vllm(app):
     assert r.status_code == 201
     body = r.json()
     assert body["backend"] == "vllm"
+
+
+@pytest.mark.asyncio
+async def test_create_list_revoke_key(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        r = await c.post("/admin/keys", json={"name": "alice", "tier": "standard"})
+        assert r.status_code == 201
+        body = r.json()
+        assert body["secret"].startswith("sk-")
+        kid = body["id"]
+
+        r = await c.get("/admin/keys")
+        assert r.status_code == 200
+        names = [k["name"] for k in r.json()]
+        assert "alice" in names
+
+        r = await c.delete(f"/admin/keys/{kid}")
+        assert r.status_code == 204
+
+        r = await c.get("/admin/keys")
+        revoked = [k for k in r.json() if k["id"] == kid]
+        assert revoked[0]["revoked"] is True
