@@ -173,11 +173,22 @@ class LifecycleManager:
             # override every vLLM container takes its requested fraction of the
             # *whole* GPU, so two co-located deployments fight for memory and
             # the later one OOMs. We compute fraction = (our share per GPU)
-            # / (per-GPU total), with a small safety margin under 1.0.
+            # / (per-GPU total), bounded by a minimum that gives vLLM room
+            # for weights + CUDA workspace + a usable KV cache. The KV estimator's
+            # output is the model's minimum need; vLLM itself wants headroom
+            # for paged-attention blocks, NCCL buffers, compiled kernels, etc.
             tp = len(gpu_ids)
             per_gpu_mb = self._topology.gpus[gpu_ids[0]].total_mb
             per_gpu_reserved = vram_mb / tp
-            mem_util = min(0.95, max(0.05, per_gpu_reserved / per_gpu_mb))
+            # vLLM headroom: at least 2 GB above our reservation, or 1.5x our
+            # estimate, whichever is larger. Plus a hard 15% floor on the GPU
+            # so vLLM has somewhere to put paged-attention blocks.
+            per_gpu_target = max(
+                per_gpu_reserved * 1.5,
+                per_gpu_reserved + 2048,
+                per_gpu_mb * 0.15,
+            )
+            mem_util = min(0.95, max(0.05, per_gpu_target / per_gpu_mb))
             effective_plan = replace(
                 plan,
                 gpu_ids=list(gpu_ids),
