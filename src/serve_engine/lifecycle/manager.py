@@ -92,13 +92,19 @@ class LifecycleManager:
             dep_store.update_status(self._conn, dep.id, "loading")
 
             backend = self._backends[plan.backend]
+            # Mount the entire models_dir so HF's snapshot symlinks (which point
+            # up into ../blobs/) resolve inside the container. Translate the
+            # absolute local_path into its container-side equivalent under /cache.
+            container_model_path = "/cache/" + str(
+                Path(local_path).resolve().relative_to(self._models_dir.resolve())
+            )
             handle = self._docker.run(
                 image=plan.image_tag,
                 name=f"serve-{plan.backend}-{plan.model_name}-{dep.id}",
-                command=backend.build_argv(plan, local_model_path="/model"),
+                command=backend.build_argv(plan, local_model_path=container_model_path),
                 environment=backend.container_env(plan),
                 kwargs=backend.container_kwargs(plan),
-                volumes={local_path: {"bind": "/model", "mode": "ro"}},
+                volumes={str(self._models_dir.resolve()): {"bind": "/cache", "mode": "ro"}},
                 internal_port=8000,
             )
             dep_store.set_container(

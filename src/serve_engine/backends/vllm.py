@@ -11,7 +11,7 @@ ENGINE_INTERNAL_PORT = 8000
 
 class VLLMBackend:
     name: ClassVar[str] = "vllm"
-    image_default: ClassVar[str] = "vllm/vllm-openai:v0.7.3"
+    image_default: ClassVar[str] = "vllm/vllm-openai:v0.20.2"
     health_path: ClassVar[str] = "/health"
     openai_base: ClassVar[str] = "/v1"
     metrics_path: ClassVar[str] = "/metrics"
