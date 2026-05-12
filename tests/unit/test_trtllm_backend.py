@@ -144,3 +144,21 @@ def test_build_argv_omits_config_flag_when_path_none():
     """No --config when manager doesn't pass one (defensive default)."""
     argv = TRTLLMBackend().build_argv(_plan(), local_model_path="/models/x")
     assert "--config" not in argv
+
+
+def test_supports_adapters_is_false():
+    """TRT-LLM PyTorch backend does NOT support adapters; the lifecycle
+    enforces this so deployments aren't created with max_loras > 0 against
+    a TRT-LLM backend."""
+    assert TRTLLMBackend.supports_adapters is False
+
+
+def test_build_argv_unaware_of_max_loras_does_not_break():
+    """TRT-LLM build_argv with max_loras>0 doesn't crash (the higher-level
+    create_deployment guard rejects this combo before we reach build_argv;
+    test here defends against accidental bypass)."""
+    argv = TRTLLMBackend().build_argv(_plan(max_loras=8), local_model_path="/m")
+    # No --enable-lora / --max-loras-per-batch / --max-loras emitted by us.
+    assert "--enable-lora" not in argv
+    assert "--max-loras-per-batch" not in argv
+    assert "--max-loras" not in argv

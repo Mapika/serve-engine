@@ -30,6 +30,11 @@ class ContainerBackend:
     NVIDIA device requests. Subclasses set `name` and implement `build_argv`."""
 
     name: ClassVar[str]
+    # True if this backend can hot-load LoRA adapters at runtime via the
+    # engine's load/unload HTTP endpoints. vLLM and SGLang inherit True;
+    # TRT-LLM overrides to False (its adapter story is on the legacy
+    # AOT-engine path, incompatible with our PyTorch-backend deployments).
+    supports_adapters: ClassVar[bool] = True
 
     def __init__(self, manifest: EngineManifest | None = None):
         if manifest is None:

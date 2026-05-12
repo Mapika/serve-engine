@@ -33,6 +33,12 @@ class DeploymentPlan:
     # --max_batch_size. None = let the manager pick a model-size-aware value
     # at load time (see kv_estimator.default_target_concurrency).
     target_concurrency: int | None = None
+    # LoRA adapter slot count for this deployment. 0 = LoRA disabled.
+    # If >0, the chosen backend must have supports_adapters=True (validated
+    # by the manager at deployment-creation time, since DeploymentPlan
+    # itself doesn't know about backend objects). Adapters loaded into this
+    # deployment are tracked in the deployment_adapters junction table.
+    max_loras: int = 0
 
     def __post_init__(self) -> None:
         if self.backend not in SUPPORTED_BACKENDS:
@@ -53,3 +59,5 @@ class DeploymentPlan:
             )
         if not 0.05 <= self.gpu_memory_utilization <= 1.0:
             raise ValueError("gpu_memory_utilization must be in [0.05, 1.0]")
+        if self.max_loras < 0:
+            raise ValueError("max_loras must be >= 0")

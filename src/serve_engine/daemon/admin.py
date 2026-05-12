@@ -87,6 +87,7 @@ class CreateDeploymentRequest(BaseModel):
     pinned: bool = False
     idle_timeout_s: int | None = None
     target_concurrency: int | None = None
+    max_loras: int = 0
     extra_args: dict[str, str] = {}
 
 
@@ -149,10 +150,18 @@ async def create_deployment(
             pinned=body.pinned,
             idle_timeout_s=body.idle_timeout_s,
             target_concurrency=body.target_concurrency,
+            max_loras=body.max_loras,
             extra_args=dict(body.extra_args),
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    # Backend-aware validation: max_loras > 0 requires an adapter-capable backend.
+    if plan.max_loras > 0 and not backend.supports_adapters:
+        raise HTTPException(
+            400,
+            f"backend {backend_name!r} does not support LoRA adapters; "
+            f"`max_loras` must be 0 (got {plan.max_loras})",
+        )
     dep = await manager.load(plan)
     return {**asdict(dep), "gpu_ids": dep.gpu_ids}
 

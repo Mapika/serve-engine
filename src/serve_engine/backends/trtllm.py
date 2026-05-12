@@ -32,9 +32,15 @@ class TRTLLMBackend(ContainerBackend):
     `print_iter_log` (so /metrics aggregates engine-level stats — kv-cache,
     batch fill, scheduler) and a CUDA-graph batch-size ladder sized to the
     plan's target_concurrency.
+
+    LoRA adapter hot-load is NOT supported. TRT-LLM's adapter story lives
+    on the legacy AOT-engine build path (trtllm-build), which is
+    incompatible with the PyTorch-backend deployments we use. Tracked in
+    docs/superpowers/specs/2026-05-13-adapter-lifecycle-design.md §6.
     """
 
     name = "trtllm"
+    supports_adapters = False
 
     def build_argv(
         self,

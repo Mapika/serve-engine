@@ -80,3 +80,33 @@ def test_build_argv_extra_args_bare_flag():
     if idx + 1 < len(argv):
         assert argv[idx + 1].startswith("--")
     assert "" not in argv
+
+
+def test_build_argv_no_lora_flags_when_max_loras_zero():
+    """Default behavior unchanged: no LoRA flags emitted when max_loras=0."""
+    argv = VLLMBackend().build_argv(_plan(), local_model_path="/m")
+    assert "--enable-lora" not in argv
+    assert "--max-loras" not in argv
+
+
+def test_build_argv_emits_lora_flags_when_max_loras_set():
+    """max_loras=4 → --enable-lora --max-loras 4 in argv."""
+    argv = VLLMBackend().build_argv(_plan(max_loras=4), local_model_path="/m")
+    i = argv.index("--enable-lora")
+    j = argv.index("--max-loras")
+    assert argv[j + 1] == "4"
+    # --enable-lora must precede --max-loras (vLLM CLI tolerates either order
+    # but the bare flag belongs first conventionally).
+    assert i < j
+
+
+def test_build_argv_lora_flags_survive_extra_args():
+    """If the operator passes a conflicting --max-loras via --extra, the
+    backend's value is replaced (not duplicated) by _append_extra's dedup."""
+    argv = VLLMBackend().build_argv(
+        _plan(max_loras=4, extra_args={"--max-loras": "8"}),
+        local_model_path="/m",
+    )
+    occurrences = [i for i, x in enumerate(argv) if x == "--max-loras"]
+    assert len(occurrences) == 1
+    assert argv[occurrences[0] + 1] == "8"

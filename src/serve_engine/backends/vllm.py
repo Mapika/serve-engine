@@ -29,6 +29,15 @@ class VLLMBackend(ContainerBackend):
             argv.append("--enable-prefix-caching")
         if plan.enable_chunked_prefill:
             argv.append("--enable-chunked-prefill")
+        if plan.max_loras > 0:
+            # LoRA hot-load via /v1/load_lora_adapter endpoint requires
+            # --enable-lora at startup. --max-loras caps the concurrent
+            # adapter slots; adapters beyond this evict each other (per
+            # the per-deployment LRU we maintain in deployment_adapters).
+            argv.extend([
+                "--enable-lora",
+                "--max-loras", str(plan.max_loras),
+            ])
         argv.extend(self.manifest.extra_launch_args)
         self._append_extra(argv, plan.extra_args)
         return argv
