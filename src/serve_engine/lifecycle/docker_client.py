@@ -92,6 +92,31 @@ class DockerClient:
         if remove:
             c.remove()
 
+    def container_pids(self, container_id: str) -> list[int]:
+        """All host-side PIDs running inside the container, including
+        children spawned by the entrypoint (e.g. vLLM EngineCore subprocs).
+        Empty list if the container is gone or not running.
+        """
+        try:
+            c = self._client.containers.get(container_id)
+            top = c.top()  # docker top: host-pid view
+        except Exception:
+            return []
+        titles = top.get("Titles") or []
+        rows = top.get("Processes") or []
+        try:
+            pid_idx = titles.index("PID")
+        except ValueError:
+            pid_idx = 1  # convention: ['UID', 'PID', 'PPID', ...]
+        out: list[int] = []
+        for row in rows:
+            if pid_idx < len(row):
+                try:
+                    out.append(int(row[pid_idx]))
+                except ValueError:
+                    pass
+        return out
+
     def stream_logs(
         self,
         container_id: str,

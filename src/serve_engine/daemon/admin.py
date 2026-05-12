@@ -98,11 +98,27 @@ class CreateModelRequest(BaseModel):
 
 
 @router.get("/deployments")
-def list_deployments(conn: sqlite3.Connection = Depends(get_conn)):
-    return [
-        {**asdict(d), "gpu_ids": d.gpu_ids}
-        for d in dep_store.list_all(conn)
-    ]
+def list_deployments(
+    conn: sqlite3.Connection = Depends(get_conn),
+    manager: LifecycleManager = Depends(get_manager),
+):
+    # Live per-process VRAM (NVML compute view) joined to each deployment by
+    # the union of pids in its docker container. vram_reserved_mb is the
+    # estimator's pre-load reservation; vram_used_mb is what nvidia-smi sees.
+    from serve_engine.observability.gpu_stats import read_compute_process_vram
+    pid_vram = read_compute_process_vram()
+    out = []
+    for d in dep_store.list_all(conn):
+        used_mb: int | None = None
+        if pid_vram and d.container_id and d.status in ("loading", "ready"):
+            try:
+                pids = manager._docker.container_pids(d.container_id)
+                total = sum(pid_vram.get(p, 0) for p in pids)
+                used_mb = total or None
+            except Exception:
+                used_mb = None
+        out.append({**asdict(d), "gpu_ids": d.gpu_ids, "vram_used_mb": used_mb})
+    return out
 
 
 @router.post("/deployments", status_code=status.HTTP_201_CREATED)

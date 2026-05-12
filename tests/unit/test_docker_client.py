@@ -88,3 +88,25 @@ def test_stop_preserves_container_when_remove_false(fake_docker):
     dc.stop("abc123", timeout=10, remove=False)
     container.stop.assert_called_once_with(timeout=10)
     container.remove.assert_not_called()
+
+
+def test_container_pids_returns_all_host_pids(fake_docker):
+    """`docker top` row → list of int PIDs from the PID column."""
+    container = MagicMock()
+    container.top.return_value = {
+        "Titles": ["UID", "PID", "PPID", "C", "STIME", "TTY", "TIME", "CMD"],
+        "Processes": [
+            ["root", "12345", "12300", "0", "10:00", "?", "00:00:00", "python -m"],
+            ["root", "12346", "12345", "0", "10:00", "?", "00:00:00", "engine_core"],
+        ],
+    }
+    fake_docker.containers.get.return_value = container
+    dc = DockerClient(client=fake_docker, network_name="serve-engines")
+    assert dc.container_pids("abc") == [12345, 12346]
+
+
+def test_container_pids_handles_missing_container(fake_docker):
+    from docker.errors import NotFound
+    fake_docker.containers.get.side_effect = NotFound("gone")
+    dc = DockerClient(client=fake_docker, network_name="serve-engines")
+    assert dc.container_pids("abc") == []

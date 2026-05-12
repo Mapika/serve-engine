@@ -2,10 +2,31 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api'
 
-function fmtVram(mb: number, status: string): string {
-  if (!mb || status === 'stopped' || status === 'failed') return '—'
+function fmtMb(mb: number | null | undefined): string {
+  if (!mb) return '—'
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
   return `${mb} MB`
+}
+
+function VramCell({ used, reserved, status }: { used: number | null; reserved: number; status: string }) {
+  if (status === 'stopped' || status === 'failed') {
+    return <span>—</span>
+  }
+  if (used && used > 0) {
+    return (
+      <div className="flex flex-col items-end leading-tight">
+        <span>{fmtMb(used)}</span>
+        <span className="text-mute text-[10px]">est {fmtMb(reserved)}</span>
+      </div>
+    )
+  }
+  // No live measurement yet (early load) — show the reservation.
+  return (
+    <div className="flex flex-col items-end leading-tight">
+      <span className="text-dim">{fmtMb(reserved)}</span>
+      <span className="text-mute text-[10px]">est</span>
+    </div>
+  )
 }
 
 function fmtGpus(ids: number[] | undefined): string {
@@ -115,7 +136,13 @@ export default function Dashboard() {
                   <td className={d.pinned ? 'text-accent' : 'text-mute'}>
                     {d.pinned ? '★' : '·'}
                   </td>
-                  <td className="text-right tnum">{fmtVram(d.vram_reserved_mb, d.status)}</td>
+                  <td className="text-right tnum">
+                    <VramCell
+                      used={d.vram_used_mb ?? null}
+                      reserved={d.vram_reserved_mb}
+                      status={d.status}
+                    />
+                  </td>
                   <td className="text-right text-dim tnum">{fmtGpus(d.gpu_ids)}</td>
                 </tr>
               )
