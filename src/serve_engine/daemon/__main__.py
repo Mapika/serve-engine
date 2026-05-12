@@ -11,6 +11,7 @@ import uvicorn
 
 from serve_engine import config
 from serve_engine.backends.sglang import SGLangBackend
+from serve_engine.backends.trtllm import TRTLLMBackend
 from serve_engine.backends.vllm import VLLMBackend
 from serve_engine.daemon.app import build_apps
 from serve_engine.lifecycle.docker_client import DockerClient
@@ -53,6 +54,7 @@ async def serve(public_host: str, public_port: int, sock_path: Path) -> None:
     backends = {
         "vllm": VLLMBackend(manifest["vllm"]),
         "sglang": SGLangBackend(manifest["sglang"]),
+        "trtllm": TRTLLMBackend(manifest["trtllm"]),
     }
     tcp_app, uds_app = build_apps(
         conn=conn,

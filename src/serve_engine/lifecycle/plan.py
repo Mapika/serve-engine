@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-SUPPORTED_BACKENDS = ("vllm", "sglang")
+SUPPORTED_BACKENDS = ("vllm", "sglang", "trtllm")
 SUPPORTED_DTYPES = ("auto", "bf16", "fp16", "fp8")
 
 
@@ -16,7 +16,7 @@ class DeploymentPlan:
     model_name: str
     hf_repo: str
     revision: str
-    backend: Literal["vllm", "sglang"]
+    backend: Literal["vllm", "sglang", "trtllm"]
     image_tag: str
     gpu_ids: list[int]
     max_model_len: int
@@ -28,7 +28,11 @@ class DeploymentPlan:
     extra_args: dict[str, str] = field(default_factory=dict)
     pinned: bool = False
     idle_timeout_s: int | None = None
-    target_concurrency: int = 8  # used by KV estimator
+    # Target concurrent decode streams. Drives both the KV estimator's VRAM
+    # reservation and the engine's --max-num-seqs / --max-running-requests /
+    # --max_batch_size. None = let the manager pick a model-size-aware value
+    # at load time (see kv_estimator.default_target_concurrency).
+    target_concurrency: int | None = None
 
     def __post_init__(self) -> None:
         if self.backend not in SUPPORTED_BACKENDS:

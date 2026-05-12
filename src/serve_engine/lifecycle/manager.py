@@ -11,7 +11,11 @@ import httpx
 from serve_engine.backends.base import Backend
 from serve_engine.lifecycle.docker_client import DockerClient
 from serve_engine.lifecycle.downloader import download_model
-from serve_engine.lifecycle.kv_estimator import KVEstimateInput, estimate_vram_mb
+from serve_engine.lifecycle.kv_estimator import (
+    KVEstimateInput,
+    default_target_concurrency,
+    estimate_vram_mb,
+)
 from serve_engine.lifecycle.placement import (
     AllocatedDeployment,
     EvictThenFit,
@@ -73,17 +77,6 @@ class LifecycleManager:
         if self._events is not None:
             await self._events.publish(Event(kind=kind, payload=payload))
 
-    @property
-    def docker(self) -> DockerClient:
-        return self._docker
-
-    @property
-    def active(self):
-        # Backwards-compat property: returns the most-recently-loaded ready dep
-        # or None. Used by the logs admin endpoint.
-        ready = dep_store.list_ready(self._conn)
-        return ready[-1] if ready else None
-
     async def load(self, plan: DeploymentPlan):
         async with self._lock:
             # 1. Ensure model row
@@ -106,11 +99,24 @@ class LifecycleManager:
                 )
                 model_store.set_local_path(self._conn, model.id, local_path)
 
-            # 3. Estimate VRAM
+            # 3. Resolve target_concurrency (None → model-size-aware default)
+            #    and estimate VRAM.
+            if plan.target_concurrency is None:
+                target_concurrency = default_target_concurrency(
+                    Path(local_path),
+                    max_model_len=plan.max_model_len,
+                    dtype=plan.dtype,
+                )
+                log.info(
+                    "auto target_concurrency=%d for %s (ctx=%d, dtype=%s)",
+                    target_concurrency, plan.model_name, plan.max_model_len, plan.dtype,
+                )
+            else:
+                target_concurrency = plan.target_concurrency
             vram_mb = estimate_vram_mb(KVEstimateInput(
                 model_dir=Path(local_path),
                 max_model_len=plan.max_model_len,
-                target_concurrency=plan.target_concurrency,
+                target_concurrency=target_concurrency,
                 dtype=plan.dtype,
             ))
 
@@ -201,6 +207,7 @@ class LifecycleManager:
                 gpu_ids=list(gpu_ids),
                 tensor_parallel=tp,
                 gpu_memory_utilization=mem_util,
+                target_concurrency=target_concurrency,
             )
             handle = self._docker.run(
                 image=plan.image_tag,
@@ -241,13 +248,9 @@ class LifecycleManager:
             await self._emit("deployment.ready", dep_id=dep.id)
             return dep_store.get_by_id(self._conn, dep.id)
 
-    async def stop(self, dep_id: int | None = None) -> None:
+    async def stop(self, dep_id: int) -> None:
         async with self._lock:
-            if dep_id is None:
-                for d in dep_store.list_ready(self._conn):
-                    await self._stop_locked(d.id)
-            else:
-                await self._stop_locked(dep_id)
+            await self._stop_locked(dep_id)
 
     async def pin(self, dep_id: int, pinned: bool = True) -> None:
         dep_store.set_pinned(self._conn, dep_id, pinned)

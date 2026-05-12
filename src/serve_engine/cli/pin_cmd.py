@@ -8,9 +8,7 @@ from serve_engine import config
 from serve_engine.cli import app, ipc
 
 
-@app.command("pin")
-def pin(model_name: str = typer.Argument(...)):
-    """Mark the deployment for <model_name> as pinned (never auto-evicted)."""
+def _toggle_pin(model_name: str, *, pin: bool) -> None:
     deps = asyncio.run(ipc.get(config.SOCK_PATH, "/admin/deployments"))
     models = asyncio.run(ipc.get(config.SOCK_PATH, "/admin/models"))
     model = next((m for m in models if m["name"] == model_name), None)
@@ -25,5 +23,18 @@ def pin(model_name: str = typer.Argument(...)):
         typer.echo(f"no ready deployment for {model_name!r}", err=True)
         raise typer.Exit(1)
     dep_id = ready[0]["id"]
-    asyncio.run(ipc.post(config.SOCK_PATH, f"/admin/deployments/{dep_id}/pin"))
-    typer.echo(f"pinned deployment #{dep_id} ({model_name})")
+    verb = "pin" if pin else "unpin"
+    asyncio.run(ipc.post(config.SOCK_PATH, f"/admin/deployments/{dep_id}/{verb}"))
+    typer.echo(f"{verb}ned deployment #{dep_id} ({model_name})")
+
+
+@app.command("pin")
+def pin(model_name: str = typer.Argument(...)):
+    """Mark the deployment for <model_name> as pinned (never auto-evicted)."""
+    _toggle_pin(model_name, pin=True)
+
+
+@app.command("unpin")
+def unpin(model_name: str = typer.Argument(...)):
+    """Mark the deployment for <model_name> as auto (LRU-evictable)."""
+    _toggle_pin(model_name, pin=False)

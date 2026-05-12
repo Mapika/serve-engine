@@ -106,6 +106,51 @@ def _count_attention_layers(cfg: dict) -> int:
     return sum(1 for t in layer_types if "linear" not in str(t).lower())
 
 
+def default_target_concurrency(
+    model_dir: Path,
+    max_model_len: int,
+    dtype: str,
+    *,
+    kv_budget_mb: int = 16384,
+    floor: int = 8,
+    cap: int = 256,
+) -> int:
+    """Pick a target_concurrency that fits within ~`kv_budget_mb` of KV cache.
+
+    The static fallback of 8 is right for ~30B-class models and ~16x too low
+    for sub-1B models. This computes per-token KV bytes from the model config
+    (architecture-aware: GQA, hybrid layers, fp8) and divides the budget by
+    the per-request KV footprint.
+
+    `kv_budget_mb` is a target, not a hard cap — placement+headroom downstream
+    enforce VRAM limits. Default 16 GB matches a comfortable single-deployment
+    KV slice on workstation Blackwell / H100 PCIe; bump for dedicated H100 SXM.
+
+    Falls back to `floor` if the model config can't be read or is malformed —
+    the downstream estimator will still try to read it and will raise the
+    actual error to the caller; this function should never block a load on
+    its own.
+    """
+    try:
+        cfg = read_model_config(model_dir)
+    except (FileNotFoundError, ValueError):
+        return floor
+    text = _arch_config(cfg)
+    n_heads = int(text.get("num_attention_heads", 1))
+    n_kv_heads = int(text.get("num_key_value_heads", n_heads))
+    head_dim = int(text.get("head_dim", text.get("hidden_size", 0) // n_heads if n_heads else 0))
+    n_attn_layers = _count_attention_layers(cfg)
+    kv_bytes_per_elem = _dtype_bytes(dtype, text.get("torch_dtype") or text.get("dtype"))
+    kv_bytes_per_token = 2 * n_attn_layers * n_kv_heads * head_dim * kv_bytes_per_elem
+    if kv_bytes_per_token == 0:
+        return floor
+    kv_bytes_per_request = kv_bytes_per_token * max_model_len
+    if kv_bytes_per_request == 0:
+        return floor
+    concurrency = (kv_budget_mb * 1024 * 1024) // kv_bytes_per_request
+    return max(floor, min(cap, int(concurrency)))
+
+
 def estimate_vram_mb(inp: KVEstimateInput) -> int:
     cfg = read_model_config(inp.model_dir)
     text = _arch_config(cfg)

@@ -11,6 +11,7 @@ def _plan(**overrides):
         image_tag="lmsysorg/sglang:v0.5.11",
         gpu_ids=[0],
         max_model_len=8192,
+        target_concurrency=8,
     )
     base.update(overrides)
     return DeploymentPlan(**base)
@@ -83,3 +84,9 @@ def test_build_argv_extra_args_bare_flag():
     if idx + 1 < len(argv):
         assert argv[idx + 1].startswith("--")
     assert "" not in argv
+
+
+def test_manifest_extra_launch_args_appear_in_argv():
+    """The version-pinned workaround flags from backends.yaml are forwarded."""
+    argv = SGLangBackend().build_argv(_plan(), local_model_path="/models/x")
+    assert "--disable-piecewise-cuda-graph" in argv

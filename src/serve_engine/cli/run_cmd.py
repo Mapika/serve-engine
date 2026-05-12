@@ -25,7 +25,7 @@ def run(
     ),
     engine: str = typer.Option(
         None, "--engine",
-        help="Force a specific engine (vllm | sglang). Default: auto-select.",
+        help="Force a specific engine (vllm | sglang | trtllm). Default: auto-select.",
     ),
     kv_cache_dtype: str = typer.Option(
         None, "--kv-cache",

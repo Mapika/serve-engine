@@ -266,7 +266,7 @@ async def test_download_model_endpoint(app, monkeypatch, tmp_path):
     """POST /admin/models/{name}/download invokes the downloader."""
     captured = {}
 
-    def fake_download_model(*, hf_repo, revision, cache_dir, on_event=None):
+    def fake_download_model(*, hf_repo, revision, cache_dir):
         captured["hf_repo"] = hf_repo
         captured["revision"] = revision
         path = tmp_path / "fake_weights"

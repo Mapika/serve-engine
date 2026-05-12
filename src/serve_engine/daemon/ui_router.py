@@ -35,9 +35,3 @@ def install_ui(app: FastAPI) -> bool:
     app.include_router(router)
     app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
     return True
-
-
-# Legacy alias kept for backwards compatibility — returns None now that we
-# install directly onto the app. Callers should use install_ui() instead.
-def make_ui_router():  # pragma: no cover
-    return None

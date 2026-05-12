@@ -57,7 +57,7 @@ async def _proxy(
         raise HTTPException(500, detail=f"unknown backend {active.backend!r}")
 
     dep_store.touch_last_request(conn, active.id)
-    request.app.state.request_count = getattr(request.app.state, "request_count", 0) + 1
+    request.app.state.request_count += 1
 
     base = f"http://{active.container_address}:{active.container_port}{backend.openai_base}"
     _HOP_BY_HOP = {"host", "content-length", "transfer-encoding", "connection"}

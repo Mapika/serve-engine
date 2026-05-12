@@ -11,6 +11,7 @@ def _plan(**overrides):
         image_tag="vllm/vllm-openai:v0.7.3",
         gpu_ids=[0],
         max_model_len=8192,
+        target_concurrency=8,
     )
     base.update(overrides)
     return DeploymentPlan(**base)

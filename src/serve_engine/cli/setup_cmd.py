@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import time
 
 import typer
 
 from serve_engine import config
 from serve_engine.cli import app, ipc
+from serve_engine.cli.daemon_cmd import spawn_daemon
 from serve_engine.doctor.runner import run_all, summarise
 
 
@@ -34,30 +34,12 @@ def setup():
         asyncio.run(ipc.get(config.SOCK_PATH, "/healthz"))
         typer.echo("  daemon already running")
     except Exception:
-        # subprocess-spawn via existing daemon_cmd path
-        import subprocess
-        import sys
-        log_path = config.LOGS_DIR / "daemon.log"
-        config.SERVE_DIR.mkdir(parents=True, exist_ok=True)
-        config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "serve_engine.daemon"],
-            stdout=open(log_path, "ab"),
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-        (config.SERVE_DIR / "daemon.pid").write_text(str(proc.pid))
-        deadline = time.time() + 15
-        while time.time() < deadline:
-            try:
-                asyncio.run(ipc.get(config.SOCK_PATH, "/healthz"))
-                typer.echo(f"  daemon started (pid {proc.pid})")
-                break
-            except Exception:
-                time.sleep(0.3)
-        else:
-            typer.secho("  daemon failed to come up; check logs", fg=typer.colors.RED, err=True)
-            raise typer.Exit(2)
+        try:
+            pid = spawn_daemon(timeout_s=15.0, poll_s=0.3)
+        except TimeoutError as e:
+            typer.secho(f"  {e}; check logs", fg=typer.colors.RED, err=True)
+            raise typer.Exit(2) from e
+        typer.echo(f"  daemon started (pid {pid})")
 
     typer.echo()
     typer.echo("Step 3: create admin key")

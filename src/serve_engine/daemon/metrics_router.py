@@ -26,7 +26,7 @@ async def metrics(request: Request) -> str:
         deployments_by_status=by_status,
         models_total=len(model_store.list_all(conn)),
         api_keys_active=_ak_store.count_active(conn),
-        request_count=getattr(request.app.state, "request_count", 0),
+        request_count=request.app.state.request_count,
     )
 
     # Engine metrics

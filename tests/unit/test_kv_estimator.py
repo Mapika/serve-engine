@@ -4,6 +4,7 @@ import pytest
 
 from serve_engine.lifecycle.kv_estimator import (
     KVEstimateInput,
+    default_target_concurrency,
     estimate_vram_mb,
     read_model_config,
 )
@@ -162,3 +163,46 @@ def test_text_config_nested_arch_fields(tmp_path):
     # Qwen3.6-35B-A3B at FP8 on-disk is ~35 GB. Estimate should be in the
     # right order of magnitude — i.e. tens of GB, not hundreds of MB.
     assert 25_000 < mb < 80_000, mb
+
+
+def test_default_target_concurrency_scales_inversely_with_model_size(tmp_path):
+    """Tiny models get more concurrency than big ones, given the same KV budget."""
+    tiny_dir = tmp_path / "tiny"
+    tiny_dir.mkdir()
+    _write_config(tiny_dir, num_hidden_layers=24, hidden_size=896,
+                  num_attention_heads=14, num_key_value_heads=2, head_dim=64)
+    big_dir = tmp_path / "big"
+    big_dir.mkdir()
+    _write_config(big_dir, num_hidden_layers=80, hidden_size=8192,
+                  num_attention_heads=64, num_key_value_heads=8, head_dim=128)
+
+    tiny_c = default_target_concurrency(tiny_dir, max_model_len=4096, dtype="bf16")
+    big_c = default_target_concurrency(big_dir, max_model_len=4096, dtype="bf16")
+    assert tiny_c > big_c
+    # And tiny should be well above the legacy default of 8 — that was the
+    # footgun we're fixing.
+    assert tiny_c >= 32
+
+
+def test_default_target_concurrency_respects_floor_and_cap(tmp_path):
+    """Massive model collapses to floor=8; tiny model is capped at cap=256."""
+    massive = tmp_path / "massive"
+    massive.mkdir()
+    # Pathologically large KV per token to force floor.
+    _write_config(massive, num_hidden_layers=200, hidden_size=16384,
+                  num_attention_heads=128, num_key_value_heads=128, head_dim=256)
+    assert default_target_concurrency(massive, max_model_len=131072, dtype="bf16") == 8
+
+    micro = tmp_path / "micro"
+    micro.mkdir()
+    # Pathologically small KV per token to force cap.
+    _write_config(micro, num_hidden_layers=2, hidden_size=64,
+                  num_attention_heads=2, num_key_value_heads=1, head_dim=16)
+    assert default_target_concurrency(micro, max_model_len=512, dtype="bf16") == 256
+
+
+def test_default_target_concurrency_falls_back_on_missing_config(tmp_path):
+    """Production resilience: never block a load on a config-read failure."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert default_target_concurrency(empty, max_model_len=8192, dtype="bf16") == 8

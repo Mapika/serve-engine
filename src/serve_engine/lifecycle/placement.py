@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import combinations
 
+from serve_engine.lifecycle.plan import _is_power_of_two
 from serve_engine.lifecycle.topology import Topology
 
 
@@ -38,10 +39,6 @@ class NoRoom:
 
 
 Decision = Fit | EvictThenFit | NoRoom
-
-
-def _is_power_of_two(n: int) -> bool:
-    return n > 0 and (n & (n - 1)) == 0
 
 
 def _available_mb(topo: Topology, allocated: list[AllocatedDeployment]) -> dict[int, int]:

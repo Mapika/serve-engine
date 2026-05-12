@@ -14,13 +14,12 @@ from serve_engine.cli import (  # noqa: E402
     key_cmd,  # noqa: F401  registers `key` sub-app
     logs_cmd,  # noqa: F401  registers command
     ls_cmd,  # noqa: F401  registers command
-    pin_cmd,  # noqa: F401  registers command
+    pin_cmd,  # noqa: F401  registers `pin` and `unpin` commands
     ps_cmd,  # noqa: F401  registers command
     pull_cmd,  # noqa: F401  registers command
     run_cmd,  # noqa: F401  registers command
     setup_cmd,  # noqa: F401  registers command
     stop_cmd,  # noqa: F401  registers command
     top_cmd,  # noqa: F401  registers command
-    unpin_cmd,  # noqa: F401  registers command
     update_engines_cmd,  # noqa: F401  registers command
 )

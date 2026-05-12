@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import random
 import statistics
 import subprocess
@@ -32,6 +33,10 @@ import httpx
 
 BASE = "http://127.0.0.1:11500"
 SERVE_BIN = Path(__file__).resolve().parent.parent / ".venv" / "bin" / "serve"
+# When auth is enabled (any active API key in the daemon), set SERVE_API_KEY
+# to a Bearer secret. Empty string disables the header.
+API_KEY = os.environ.get("SERVE_API_KEY", "")
+AUTH_HEADERS = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
 
 
 def _run_serve(*args: str) -> str:
@@ -77,6 +82,7 @@ async def one_request(
     try:
         async with client.stream(
             "POST", f"{BASE}/v1/chat/completions",
+            headers=AUTH_HEADERS,
             json={
                 "model": model,
                 "messages": [{"role": "user", "content": PROMPT}],
@@ -227,8 +233,12 @@ async def amain(args: argparse.Namespace) -> None:
     for model in args.models.split(","):
         for engine in args.engines.split(","):
             print(f"\n=== {model} on {engine} ===", flush=True)
-            cold_s = cold_load(model, engine, ctx=args.ctx)
-            print(f"  cold_load_s        = {cold_s:.1f}", flush=True)
+            if args.no_cold_load:
+                cold_s = 0.0
+                print("  cold_load skipped (--no-cold-load)", flush=True)
+            else:
+                cold_s = cold_load(model, engine, ctx=args.ctx)
+                print(f"  cold_load_s        = {cold_s:.1f}", flush=True)
 
             for qps in qps_levels:
                 print(f"  measuring qps={qps} ...", flush=True)
@@ -266,6 +276,10 @@ def main() -> int:
     ap.add_argument("--max-tokens", type=int, default=512)
     ap.add_argument("--ctx", type=int, default=4096)
     ap.add_argument("--out", default="/tmp/bench-v2.json")
+    ap.add_argument("--no-cold-load", action="store_true",
+                    help="Skip the stop+run cold-load probe; bench the currently "
+                         "loaded deployment. Use when you've manually tuned `serve run` "
+                         "flags that cold_load would clobber.")
     args = ap.parse_args()
     random.seed(0)
     asyncio.run(amain(args))

@@ -18,6 +18,39 @@ app.add_typer(daemon_app, name="daemon")
 PID_FILE = config.SERVE_DIR / "daemon.pid"
 
 
+def spawn_daemon(
+    host: str = config.DEFAULT_PUBLIC_HOST,
+    port: int = config.DEFAULT_PUBLIC_PORT,
+    *,
+    timeout_s: float = 30.0,
+    poll_s: float = 0.5,
+) -> int:
+    """Spawn the daemon process, write its PID, poll /healthz until ready.
+
+    Returns the spawned PID. Raises TimeoutError if the daemon does not become
+    healthy within `timeout_s`. Caller is responsible for ensuring no daemon
+    is already running.
+    """
+    config.SERVE_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = config.LOGS_DIR / "daemon.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "serve_engine.daemon", "--host", host, "--port", str(port)],
+        stdout=open(log_path, "ab"),  # file must outlive this Popen call
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    PID_FILE.write_text(str(proc.pid))
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            asyncio.run(ipc.get(config.SOCK_PATH, "/healthz"))
+            return proc.pid
+        except Exception:
+            time.sleep(poll_s)
+    raise TimeoutError(f"daemon failed to become ready within {timeout_s:.0f}s")
+
+
 def _is_running() -> bool:
     if not PID_FILE.exists():
         return False
@@ -41,26 +74,12 @@ def daemon_start(
     if _is_running():
         typer.echo("daemon already running")
         raise typer.Exit(0)
-    config.SERVE_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = config.LOGS_DIR / "daemon.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "serve_engine.daemon", "--host", host, "--port", str(port)],
-        stdout=open(log_path, "ab"),  # file must outlive this Popen call
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    PID_FILE.write_text(str(proc.pid))
-    deadline = time.time() + 30
-    while time.time() < deadline:
-        try:
-            asyncio.run(ipc.get(config.SOCK_PATH, "/healthz"))
-            typer.echo(f"daemon started (pid {proc.pid}) on http://{host}:{port}")
-            return
-        except Exception:
-            time.sleep(0.5)
-    typer.echo("daemon failed to become ready within 30s", err=True)
-    raise typer.Exit(1)
+    try:
+        pid = spawn_daemon(host, port)
+    except TimeoutError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1) from e
+    typer.echo(f"daemon started (pid {pid}) on http://{host}:{port}")
 
 
 @daemon_app.command("stop")

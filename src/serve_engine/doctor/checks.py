@@ -168,7 +168,8 @@ def check_hf_token() -> CheckResult:
 
 
 def check_engine_images() -> CheckResult:
-    """Check whether vLLM and SGLang images are cached locally."""
+    """Check whether each registered engine's image is cached locally."""
+    from serve_engine.backends.manifest import load_manifest
     try:
         client = _docker_from_env()
         tags = set()
@@ -182,12 +183,13 @@ def check_engine_images() -> CheckResult:
         )
     found = []
     missing = []
-    for prefix in ("vllm/vllm-openai:", "lmsysorg/sglang:"):
+    for engine in load_manifest().values():
+        prefix = f"{engine.image}:"
         hit = [t for t in tags if t.startswith(prefix)]
         if hit:
             found.append(hit[0])
         else:
-            missing.append(prefix.rstrip(":"))
+            missing.append(engine.image)
     if missing:
         return CheckResult(
             name="engine images",

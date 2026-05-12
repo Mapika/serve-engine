@@ -35,6 +35,10 @@ class EngineManifest:
     metrics_path: str
     internal_port: int
     headroom: Headroom
+    # Engine-version-specific flags appended to argv after the backend's own
+    # flags but before plan.extra_args. Use this for workarounds tied to a
+    # pinned image tag — when the tag is bumped, revisit these.
+    extra_launch_args: tuple[str, ...] = ()
 
     @property
     def image_default(self) -> str:
@@ -89,6 +93,7 @@ def load_manifest(path: Path | None = None) -> dict[str, EngineManifest]:
                 min_extra_mb=int(hr.get("min_extra_mb", 2048)),
                 min_floor_pct=int(hr.get("min_floor_pct", 15)),
             ),
+            extra_launch_args=tuple(e.get("extra_launch_args") or ()),
         )
     return out
 

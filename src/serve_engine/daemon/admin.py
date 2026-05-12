@@ -7,7 +7,6 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from fastapi.responses import StreamingResponse as _SSE
 from pydantic import BaseModel
 
 from serve_engine.auth.middleware import require_auth_dep
@@ -87,7 +86,7 @@ class CreateDeploymentRequest(BaseModel):
     dtype: str = "auto"
     pinned: bool = False
     idle_timeout_s: int | None = None
-    target_concurrency: int = 8
+    target_concurrency: int | None = None
     extra_args: dict[str, str] = {}
 
 
@@ -171,7 +170,7 @@ async def stop_deployment(
 
 @router.delete("/deployments", status_code=status.HTTP_204_NO_CONTENT)
 async def stop_all_deployments(manager: LifecycleManager = Depends(get_manager)):
-    await manager.stop()  # stops all
+    await manager.stop_all()
 
 
 @router.get("/models")
@@ -271,7 +270,7 @@ def stream_current_logs(request: Request):
 
 
 @router.get("/deployments/{dep_id}/logs/stream")
-async def stream_engine_logs_sse(dep_id: int, request: Request) -> _SSE:
+async def stream_engine_logs_sse(dep_id: int, request: Request) -> StreamingResponse:
     """SSE: stdout/stderr of the engine container for this deployment.
 
     Designed for the browser EventSource — each docker log chunk is reframed
@@ -314,7 +313,7 @@ async def stream_engine_logs_sse(dep_id: int, request: Request) -> _SSE:
                 if line:
                     yield f"data: {line}\n\n"
 
-    return _SSE(gen(), media_type="text/event-stream")
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 class CreateKeyRequest(BaseModel):
@@ -376,7 +375,7 @@ def revoke_key(
 
 
 @router.get("/events")
-async def events(request: Request) -> _SSE:
+async def events(request: Request) -> StreamingResponse:
     """SSE: lifecycle events as `data: <json>\n\n` chunks. Heartbeat every 15s."""
     bus = request.app.state.event_bus
 
@@ -393,7 +392,7 @@ async def events(request: Request) -> _SSE:
                 except TimeoutError:
                     yield ":hb\n\n"  # SSE comment heartbeat
 
-    return _SSE(gen(), media_type="text/event-stream")
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @router.get("/gpus")
