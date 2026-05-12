@@ -44,6 +44,7 @@ class VLLMBackend:
             "--model", local_model_path,
             "--tensor-parallel-size", str(plan.tensor_parallel),
             "--max-model-len", str(plan.max_model_len),
+            "--max-num-seqs", str(plan.target_concurrency),
             "--gpu-memory-utilization", str(plan.gpu_memory_utilization),
             "--dtype", plan.dtype,
             "--host", "0.0.0.0",

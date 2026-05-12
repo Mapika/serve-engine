@@ -24,10 +24,19 @@ def test_build_argv_minimum():
     assert argv[argv.index("--tensor-parallel-size") + 1] == "1"
     assert "--max-model-len" in argv
     assert argv[argv.index("--max-model-len") + 1] == "8192"
+    assert "--max-num-seqs" in argv
+    assert argv[argv.index("--max-num-seqs") + 1] == "8"  # plan default
     assert "--enable-prefix-caching" in argv
     assert "--enable-chunked-prefill" in argv
     assert "--host" in argv and argv[argv.index("--host") + 1] == "0.0.0.0"
     assert "--port" in argv and argv[argv.index("--port") + 1] == "8000"
+
+
+def test_build_argv_max_num_seqs_from_target_concurrency():
+    argv = VLLMBackend().build_argv(
+        _plan(target_concurrency=64), local_model_path="/m",
+    )
+    assert argv[argv.index("--max-num-seqs") + 1] == "64"
 
 
 def test_build_argv_tp_4():

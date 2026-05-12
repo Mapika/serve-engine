@@ -48,6 +48,7 @@ class SGLangBackend:
             "--model-path", local_model_path,
             "--tp", str(plan.tensor_parallel),
             "--context-length", str(plan.max_model_len),
+            "--max-running-requests", str(plan.target_concurrency),
             "--mem-fraction-static", str(plan.gpu_memory_utilization),
             "--dtype", plan.dtype if plan.dtype != "auto" else "auto",
             "--host", "0.0.0.0",

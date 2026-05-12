@@ -32,6 +32,13 @@ def run(
         help="KV cache dtype passed to engine (e.g. 'fp8_e4m3'). "
              "Shorthand for --extra '--kv-cache-dtype=...'.",
     ),
+    max_seqs: int = typer.Option(
+        None, "--max-seqs",
+        help="Max concurrent decode sequences. Drives vLLM --max-num-seqs "
+             "and SGLang --max-running-requests, and feeds the KV-pool "
+             "sizing. Lower this for hybrid/Mamba architectures where each "
+             "decode sequence consumes a state-cache block.",
+    ),
     extra: list[str] = typer.Option(
         [], "--extra", "-x",
         help="Raw engine flag, e.g. -x '--reasoning-parser=qwen3' "
@@ -87,6 +94,8 @@ def run(
         body["image_tag"] = image_tag
     if engine is not None:
         body["backend"] = engine
+    if max_seqs is not None:
+        body["target_concurrency"] = max_seqs
     if extra_args:
         body["extra_args"] = extra_args
 

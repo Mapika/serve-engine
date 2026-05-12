@@ -29,9 +29,18 @@ def test_build_argv_minimum():
     assert argv[argv.index("--tp") + 1] == "1"
     assert "--context-length" in argv
     assert argv[argv.index("--context-length") + 1] == "8192"
+    assert "--max-running-requests" in argv
+    assert argv[argv.index("--max-running-requests") + 1] == "8"  # plan default
     assert "--mem-fraction-static" in argv
     assert "--host" in argv and argv[argv.index("--host") + 1] == "0.0.0.0"
     assert "--port" in argv and argv[argv.index("--port") + 1] == "30000"
+
+
+def test_build_argv_max_running_requests_from_target_concurrency():
+    argv = SGLangBackend().build_argv(
+        _plan(target_concurrency=128), local_model_path="/m",
+    )
+    assert argv[argv.index("--max-running-requests") + 1] == "128"
 
 
 def test_build_argv_tp_4():
