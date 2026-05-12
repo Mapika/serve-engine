@@ -254,6 +254,53 @@ def stream_current_logs(request: Request):
     return StreamingResponse(gen(), media_type="text/plain")
 
 
+@router.get("/deployments/{dep_id}/logs/stream")
+async def stream_engine_logs_sse(dep_id: int, request: Request) -> _SSE:
+    """SSE: stdout/stderr of the engine container for this deployment.
+
+    Designed for the browser EventSource — each docker log chunk is reframed
+    as one or more `data: <line>` SSE events. Includes the last 500 lines as
+    history before following. The underlying sync iterator from docker-py is
+    bridged into the event loop via asyncio.to_thread; on client disconnect
+    the consumer task is cancelled but the docker iterator may continue to
+    drain in the background until the container stops (small thread leak,
+    acceptable since these are bounded by container lifetime).
+    """
+    conn: sqlite3.Connection = request.app.state.conn
+    docker_client = request.app.state.manager._docker
+    dep = dep_store.get_by_id(conn, dep_id)
+    if dep is None:
+        raise HTTPException(404, f"no deployment with id {dep_id}")
+    if dep.container_id is None:
+        raise HTTPException(404, f"deployment {dep_id} has no container")
+
+    async def gen():
+        yield ":ok\n\n"
+        try:
+            sync_iter = docker_client.stream_logs(
+                dep.container_id, follow=True, tail=500,
+            )
+        except Exception as e:
+            yield f"data: [serve-engine] failed to attach: {e}\n\n"
+            return
+        sentinel = object()
+        while True:
+            chunk = await asyncio.to_thread(next, sync_iter, sentinel)
+            if chunk is sentinel:
+                yield "data: [serve-engine] log stream ended\n\n"
+                return
+            if isinstance(chunk, bytes):
+                text = chunk.decode("utf-8", errors="replace")
+            else:
+                text = str(chunk)
+            for line in text.splitlines():
+                # Each SSE event must be a single line; collapse blank lines.
+                if line:
+                    yield f"data: {line}\n\n"
+
+    return _SSE(gen(), media_type="text/event-stream")
+
+
 class CreateKeyRequest(BaseModel):
     name: str
     tier: str = "standard"

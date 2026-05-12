@@ -92,9 +92,15 @@ class DockerClient:
         if remove:
             c.remove()
 
-    def stream_logs(self, container_id: str, *, follow: bool = False) -> Iterator[bytes]:
+    def stream_logs(
+        self,
+        container_id: str,
+        *,
+        follow: bool = False,
+        tail: int | str = "all",
+    ) -> Iterator[bytes]:
         c = self._client.containers.get(container_id)
-        return c.logs(stream=True, follow=follow)
+        return c.logs(stream=True, follow=follow, tail=tail)
 
     def pull(self, image: str) -> None:
         self._client.images.pull(image)
