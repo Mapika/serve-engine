@@ -7,31 +7,53 @@ export default function TokenGate({ children }: { children: React.ReactNode }) {
 
   if (!token) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-8">
-        <div className="max-w-md w-full bg-white rounded-lg shadow p-6 space-y-4">
-          <h1 className="text-xl font-semibold">serve-engine</h1>
-          <p className="text-sm text-gray-600">
-            Paste an admin-tier API key. Create one with:
-          </p>
-          <pre className="text-xs bg-gray-100 rounded p-2 overflow-x-auto">
-serve key create web --tier admin
-          </pre>
-          <input
-            className="w-full border rounded px-3 py-2 font-mono text-sm"
-            placeholder="sk-..."
-            value={input}
-            onChange={e => setInput(e.target.value)}
-          />
-          <button
-            className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:opacity-50"
-            disabled={!input.trim()}
-            onClick={() => {
-              setToken(input.trim())
-              setLocalToken(input.trim())
-            }}
-          >
-            Continue
-          </button>
+      <div className="min-h-screen flex items-center justify-center px-6">
+        <div className="w-full max-w-md enter">
+          <div className="flex items-center gap-2 mb-12">
+            <div className="text-base">
+              serve<span className="text-accent">-</span>engine
+            </div>
+            <span className="caret" />
+          </div>
+          <div className="space-y-8">
+            <div className="space-y-2">
+              <div className="label">authenticate</div>
+              <p className="text-dim text-[12px] leading-relaxed">
+                Paste an admin-tier API key. If you don't have one,
+                run this on the host:
+              </p>
+              <pre className="text-[12px] bg-elev border border-rule px-3 py-2 text-ink overflow-x-auto">
+                <span className="text-mute select-none">$ </span>
+                serve key create web --tier admin
+              </pre>
+            </div>
+            <div className="space-y-3">
+              <div className="label">api key</div>
+              <input
+                className="field w-full font-mono"
+                placeholder="sk-..."
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && input.trim()) {
+                    setToken(input.trim())
+                    setLocalToken(input.trim())
+                  }
+                }}
+                autoFocus
+              />
+              <button
+                className="btn-primary w-full"
+                disabled={!input.trim()}
+                onClick={() => {
+                  setToken(input.trim())
+                  setLocalToken(input.trim())
+                }}
+              >
+                Continue →
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     )

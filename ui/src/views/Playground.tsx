@@ -74,8 +74,6 @@ export default function Playground() {
           try {
             const obj = JSON.parse(payload)
             const delta = obj.choices?.[0]?.delta ?? {}
-            // vLLM's --reasoning-parser=qwen3 emits reasoning under
-            // delta.reasoning (some builds use delta.reasoning_content).
             const rd: string = delta.reasoning ?? delta.reasoning_content ?? ''
             const cd: string = delta.content ?? ''
             if ((rd || cd) && firstTokenAt === null) {
@@ -88,9 +86,7 @@ export default function Playground() {
         }
       }
     } catch (e: any) {
-      if (e?.name !== 'AbortError') {
-        setError(`error: ${e?.message ?? e}`)
-      }
+      if (e?.name !== 'AbortError') setError(`error: ${e?.message ?? e}`)
     } finally {
       const t1 = performance.now()
       setStats(s => ({
@@ -103,89 +99,123 @@ export default function Playground() {
     }
   }
 
-  function stop() {
-    abortRef.current?.abort()
-  }
+  function stop() { abortRef.current?.abort() }
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-2xl font-bold">Playground</h2>
-      <div className="flex gap-2 items-center flex-wrap">
-        <select
-          className="border rounded px-3 py-2"
-          value={selected}
-          onChange={e => setSelected(e.target.value)}
-        >
-          <option value="">— choose model —</option>
-          {(models.data ?? []).map((m: any) => (
-            <option key={m.name} value={m.name}>{m.name}</option>
-          ))}
-        </select>
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-gray-600">max_tokens</span>
-          <input
-            type="number"
-            className="border rounded px-2 py-1 w-24 font-mono"
-            value={maxTokens}
-            min={32}
-            max={32768}
-            step={256}
-            onChange={e => setMaxTokens(Number(e.target.value) || 4096)}
+    <div className="space-y-10">
+      <header className="flex items-baseline justify-between">
+        <h2 className="text-2xl font-light tracking-tightish caret">playground</h2>
+        <div className="label">openai-compatible</div>
+      </header>
+
+      <section className="space-y-6">
+        <div className="grid grid-cols-[1fr_180px] gap-4">
+          <div className="space-y-2">
+            <div className="label">model</div>
+            <select
+              className="field w-full font-mono"
+              value={selected}
+              onChange={e => setSelected(e.target.value)}
+            >
+              <option value="">— choose model —</option>
+              {(models.data ?? []).map((m: any) => (
+                <option key={m.name} value={m.name}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <div className="label">max tokens</div>
+            <input
+              type="number"
+              className="field w-full font-mono tnum"
+              value={maxTokens}
+              min={32}
+              max={32768}
+              step={256}
+              onChange={e => setMaxTokens(Number(e.target.value) || 4096)}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="label">prompt</div>
+          <textarea
+            className="field w-full font-mono text-[13px]"
+            style={{ minHeight: '8rem' }}
+            placeholder="ask something…"
+            value={prompt}
+            onChange={e => setPrompt(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !pending) send()
+            }}
           />
-        </label>
-      </div>
-      <textarea
-        className="w-full h-32 border rounded p-3 font-mono text-sm"
-        placeholder="Ask something…"
-        value={prompt}
-        onChange={e => setPrompt(e.target.value)}
-      />
-      <div className="flex gap-2 items-center">
-        <button
-          className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50"
-          disabled={!selected || !prompt.trim() || pending}
-          onClick={send}
-        >{pending ? 'Streaming…' : 'Send'}</button>
-        {pending && (
-          <button
-            className="bg-gray-200 px-4 py-2 rounded"
-            onClick={stop}
-          >Stop</button>
-        )}
-        {(stats.ttftMs !== null || stats.totalMs !== null) && (
-          <span className="text-sm text-gray-600 font-mono ml-2">
-            {stats.ttftMs !== null && <>ttft {stats.ttftMs}ms</>}
-            {stats.totalMs !== null && <> · total {stats.totalMs}ms</>}
-            {stats.tps !== null && <> · {stats.tps} tok/s</>}
-            {stats.tokens > 0 && <> · {stats.tokens} tokens</>}
-          </span>
-        )}
-      </div>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                className="btn-primary"
+                disabled={!selected || !prompt.trim() || pending}
+                onClick={send}
+              >
+                {pending ? 'streaming…' : 'send →'}
+              </button>
+              {pending && (
+                <button className="btn" onClick={stop}>stop</button>
+              )}
+              <span className="label">⌘↵</span>
+            </div>
+            {(stats.ttftMs !== null || stats.totalMs !== null) && (
+              <div className="flex gap-6 text-mute text-[11px] tnum">
+                {stats.ttftMs !== null && (
+                  <div><span className="text-dim">ttft</span> {stats.ttftMs}ms</div>
+                )}
+                {stats.totalMs !== null && (
+                  <div><span className="text-dim">total</span> {stats.totalMs}ms</div>
+                )}
+                {stats.tps !== null && (
+                  <div><span className="text-dim">throughput</span> {stats.tps} tok/s</div>
+                )}
+                {stats.tokens > 0 && (
+                  <div><span className="text-dim">tokens</span> {stats.tokens}</div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
 
-      {error && (
-        <pre className="bg-red-50 border border-red-200 text-red-800 p-3 rounded text-sm whitespace-pre-wrap font-mono">
-          {error}
-        </pre>
-      )}
-
-      {reasoning && (
-        <details
-          open={showThinking}
-          onToggle={e => setShowThinking((e.target as HTMLDetailsElement).open)}
-          className="bg-gray-50 border border-gray-200 rounded"
-        >
-          <summary className="cursor-pointer px-3 py-2 text-sm text-gray-600 select-none">
-            Thinking ({reasoning.length.toLocaleString()} chars)
-          </summary>
-          <pre className="px-3 pb-3 text-xs text-gray-600 whitespace-pre-wrap font-mono">
-            {reasoning}
+        {error && (
+          <pre className="text-err text-[12px] whitespace-pre-wrap font-mono border border-err/30 px-3 py-2">
+            {error}
           </pre>
-        </details>
-      )}
+        )}
 
-      <pre className="bg-white border border-gray-200 p-4 rounded text-sm whitespace-pre-wrap font-mono min-h-[8rem]">
-        {answer || (pending && !reasoning ? 'waiting for tokens…' : !pending && !reasoning && !answer && !error ? ' ' : answer)}
-      </pre>
+        {reasoning && (
+          <details
+            open={showThinking}
+            onToggle={e => setShowThinking((e.target as HTMLDetailsElement).open)}
+            className="border border-rule"
+          >
+            <summary className="cursor-pointer px-4 py-3 text-dim text-[11px] tracking-wider hover:text-ink transition-colors select-none flex items-center gap-2">
+              <span className="dot dot-loading" style={{ width: 5, height: 5 }} />
+              thinking
+              <span className="text-mute tnum">{reasoning.length.toLocaleString()}c</span>
+            </summary>
+            <pre className="px-4 pb-4 text-[12px] text-dim whitespace-pre-wrap font-mono leading-relaxed">
+              {reasoning}
+            </pre>
+          </details>
+        )}
+
+        <div className="space-y-2">
+          {(answer || (pending && !reasoning) || (!pending && !reasoning && !answer && !error)) && (
+            <div className="label">response</div>
+          )}
+          {(answer || (pending && !reasoning)) && (
+            <pre className="text-[13px] whitespace-pre-wrap font-mono leading-relaxed border-l border-accent pl-4">
+              {answer || (pending ? <span className="text-mute">waiting for tokens…</span> : '')}
+            </pre>
+          )}
+        </div>
+      </section>
     </div>
   )
 }

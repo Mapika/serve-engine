@@ -22,66 +22,95 @@ export default function Keys() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['keys'] }),
   })
 
-  return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold">API Keys</h2>
+  const active = (keys.data ?? []).filter((k: any) => !k.revoked).length
 
-      <div className="bg-white rounded shadow p-4 space-y-2">
-        <h3 className="font-semibold">Create a key</h3>
-        <div className="flex gap-2">
+  return (
+    <div className="space-y-14">
+      <header className="flex items-baseline justify-between">
+        <h2 className="text-2xl font-light tracking-tightish caret">api keys</h2>
+        <div className="label">{active} active</div>
+      </header>
+
+      <section className="space-y-5">
+        <div className="label">issue a key</div>
+        <div className="grid grid-cols-[1fr_180px_auto] gap-3 max-w-3xl">
           <input
-            className="flex-1 border rounded px-3 py-2"
-            placeholder="Label (e.g. alice)"
+            className="field font-mono"
+            placeholder="label (e.g. alice / web / cron)"
             value={name}
             onChange={e => setName(e.target.value)}
           />
-          <select className="border rounded px-3 py-2" value={tier} onChange={e => setTier(e.target.value)}>
+          <select
+            className="field font-mono"
+            value={tier}
+            onChange={e => setTier(e.target.value)}
+          >
             <option value="admin">admin</option>
             <option value="standard">standard</option>
             <option value="trial">trial</option>
           </select>
           <button
-            className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50"
+            className="btn-primary"
             disabled={!name.trim() || create.isPending}
             onClick={() => create.mutate()}
-          >Create</button>
+          >
+            {create.isPending ? 'issuing…' : 'issue →'}
+          </button>
         </div>
         {lastSecret && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm">
-            <div className="font-semibold">Save this — it won't be shown again:</div>
-            <code className="font-mono break-all">{lastSecret}</code>
+          <div className="border border-accent/40 bg-[var(--accent-soft)] px-4 py-3 max-w-3xl">
+            <div className="label text-accent mb-2">save this — it won't be shown again</div>
+            <code className="font-mono text-[13px] break-all">{lastSecret}</code>
           </div>
         )}
-      </div>
+      </section>
 
-      <table className="min-w-full bg-white shadow rounded text-sm">
-        <thead className="bg-gray-100">
-          <tr>
-            <th className="text-left p-2">ID</th><th className="text-left p-2">Name</th>
-            <th className="text-left p-2">Tier</th><th className="text-left p-2">Prefix</th>
-            <th className="text-left p-2">Status</th><th className="p-2"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {(keys.data ?? []).map((k: any) => (
-            <tr key={k.id} className="border-t">
-              <td className="p-2">{k.id}</td>
-              <td className="p-2">{k.name}</td>
-              <td className="p-2">{k.tier}</td>
-              <td className="p-2 font-mono text-gray-600">{k.prefix}</td>
-              <td className="p-2">{k.revoked ? <span className="text-red-600">revoked</span> : 'active'}</td>
-              <td className="p-2 text-right">
-                {!k.revoked && (
-                  <button
-                    className="text-red-600 hover:text-red-800"
-                    onClick={() => revoke.mutate(k.id)}
-                  >Revoke</button>
-                )}
-              </td>
+      <section className="space-y-4">
+        <div className="label">issued keys</div>
+        <table className="ditable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>label</th>
+              <th>tier</th>
+              <th>prefix</th>
+              <th>status</th>
+              <th className="text-right"></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {(keys.data ?? []).length === 0 && (
+              <tr>
+                <td colSpan={6} className="!py-12 text-center text-mute">no keys yet</td>
+              </tr>
+            )}
+            {(keys.data ?? []).map((k: any) => (
+              <tr key={k.id}>
+                <td className="text-mute tnum">{k.id}</td>
+                <td>{k.name}</td>
+                <td className="text-dim">{k.tier}</td>
+                <td className="text-mute">{k.prefix}…</td>
+                <td>
+                  <span className={`dot ${k.revoked ? 'dot-failed' : 'dot-ready'}`} />
+                  <span className={k.revoked ? 'text-err' : 'text-dim'}>
+                    {k.revoked ? 'revoked' : 'active'}
+                  </span>
+                </td>
+                <td className="text-right">
+                  {!k.revoked && (
+                    <button
+                      className="btn-link-danger"
+                      onClick={() => revoke.mutate(k.id)}
+                    >
+                      revoke
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
     </div>
   )
 }

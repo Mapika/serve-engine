@@ -16,22 +16,17 @@ export default function Logs() {
   const [streaming, setStreaming] = useState(false)
   const [streamError, setStreamError] = useState('')
   const [events, setEvents] = useState<LifecycleEvent[]>([])
-  const logRef = useRef<HTMLPreElement | null>(null)
+  const logRef = useRef<HTMLDivElement | null>(null)
   const stickToBottom = useRef(true)
 
-  // Auto-select the most recently active deployment when the list loads.
   useEffect(() => {
     if (selected !== null) return
     const list = deps.data ?? []
     const active = list.find((d: any) => d.status === 'ready' || d.status === 'loading')
-    if (active) {
-      setSelected(active.id)
-    } else if (list.length > 0) {
-      setSelected(list[list.length - 1].id)
-    }
+    if (active) setSelected(active.id)
+    else if (list.length > 0) setSelected(list[list.length - 1].id)
   }, [deps.data, selected])
 
-  // Stream container logs over SSE when a deployment is selected.
   useEffect(() => {
     if (selected === null) return
     setLines([])
@@ -45,22 +40,17 @@ export default function Logs() {
     es.onmessage = (e: MessageEvent) => {
       setLines(prev => {
         const next = [...prev, e.data]
-        // Cap history so the DOM doesn't grow unbounded.
         return next.length > 2000 ? next.slice(-2000) : next
       })
     }
     es.onerror = () => {
       setStreaming(false)
-      setStreamError('stream closed (container may have stopped, or auth failed)')
+      setStreamError('stream closed (container stopped or auth failed)')
       es.close()
     }
-    return () => {
-      setStreaming(false)
-      es.close()
-    }
+    return () => { setStreaming(false); es.close() }
   }, [selected])
 
-  // Lifecycle event stream (separate from container logs).
   useEffect(() => {
     const token = getToken()
     const url = token
@@ -77,16 +67,15 @@ export default function Logs() {
     return () => es.close()
   }, [])
 
-  // Auto-scroll while the user is at the bottom; pause when they scroll up.
   useEffect(() => {
     if (!logRef.current || !stickToBottom.current) return
     logRef.current.scrollTop = logRef.current.scrollHeight
   }, [lines])
 
-  function onLogScroll(e: React.UIEvent<HTMLPreElement>) {
+  function onLogScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight
-    stickToBottom.current = dist < 50
+    stickToBottom.current = dist < 60
   }
 
   const visibleDeps = (deps.data ?? []).filter(
@@ -94,11 +83,25 @@ export default function Logs() {
   )
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3 flex-wrap">
-        <h2 className="text-2xl font-bold">Engine logs</h2>
+    <div className="space-y-10">
+      <header className="flex items-baseline justify-between">
+        <h2 className="text-2xl font-light tracking-tightish caret">logs</h2>
+        <div className="flex items-center gap-3">
+          {streaming && (
+            <span className="flex items-center text-[11px] tracking-wider text-accent">
+              <span className="dot dot-loading" />live
+            </span>
+          )}
+          {streamError && (
+            <span className="text-err text-[11px] tracking-wider">{streamError}</span>
+          )}
+        </div>
+      </header>
+
+      <section className="space-y-3">
+        <div className="label">container</div>
         <select
-          className="border rounded px-3 py-2 text-sm"
+          className="field font-mono text-[13px] min-w-[420px]"
           value={selected ?? ''}
           onChange={e => setSelected(e.target.value ? Number(e.target.value) : null)}
         >
@@ -107,49 +110,51 @@ export default function Logs() {
             const m = (models.data ?? []).find((m: any) => m.id === d.model_id)
             return (
               <option key={d.id} value={d.id}>
-                #{d.id} · {m?.name ?? d.model_id} · {d.status}
+                #{d.id}  ·  {m?.name ?? d.model_id}  ·  {d.status}
               </option>
             )
           })}
         </select>
-        {streaming && (
-          <span className="text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded">live</span>
-        )}
-        {streamError && (
-          <span className="text-xs text-red-700 bg-red-100 px-2 py-0.5 rounded">{streamError}</span>
-        )}
-      </div>
+      </section>
 
-      <pre
-        ref={logRef}
-        onScroll={onLogScroll}
-        className="bg-black text-green-200 font-mono text-xs p-4 rounded overflow-y-auto h-[28rem] whitespace-pre-wrap"
-      >
-        {selected === null && (
-          <div className="text-gray-500">select a deployment above to tail its container logs</div>
-        )}
-        {selected !== null && lines.length === 0 && streaming && (
-          <div className="text-gray-500">waiting for output…</div>
-        )}
-        {lines.map((line, i) => (
-          <div key={i}>{line}</div>
-        ))}
-      </pre>
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="label">stdout</div>
+          <div className="text-mute text-[10px] tracking-wider tnum">{lines.length} lines</div>
+        </div>
+        <div
+          ref={logRef}
+          onScroll={onLogScroll}
+          className="bg-bg-page border border-rule font-mono text-[11.5px] leading-relaxed text-ink/80 overflow-y-auto h-[32rem] p-4"
+          style={{ background: '#08080a' }}
+        >
+          {selected === null && (
+            <div className="text-mute">select a deployment above to tail its container logs</div>
+          )}
+          {selected !== null && lines.length === 0 && streaming && (
+            <div className="text-mute">waiting for output<span className="caret"></span></div>
+          )}
+          {lines.map((line, i) => (
+            <div key={i} className="whitespace-pre-wrap break-all">{line}</div>
+          ))}
+        </div>
+      </section>
 
-      <details className="bg-white border rounded">
-        <summary className="cursor-pointer px-3 py-2 text-sm font-semibold select-none">
-          Lifecycle events {events.length > 0 && <span className="text-gray-500">({events.length})</span>}
+      <details className="border border-rule">
+        <summary className="cursor-pointer px-4 py-3 text-dim text-[11px] tracking-wider hover:text-ink transition-colors select-none flex items-center justify-between">
+          <span>lifecycle events</span>
+          <span className="text-mute tnum">{events.length}</span>
         </summary>
-        <pre className="px-3 pb-3 text-xs font-mono whitespace-pre-wrap">
-          {events.length === 0 && <div className="text-gray-500">no events yet</div>}
+        <div className="px-4 pb-4 text-[11px] font-mono space-y-1 max-h-64 overflow-y-auto">
+          {events.length === 0 && <div className="text-mute">no events yet</div>}
           {events.map((e, i) => (
-            <div key={i}>
-              <span className="text-gray-500">{e.ts.slice(11, 19)}</span>{' '}
-              <span className="text-yellow-700">{e.kind}</span>{' '}
-              <span className="text-gray-700">{JSON.stringify(e.payload)}</span>
+            <div key={i} className="flex gap-3">
+              <span className="text-mute tnum w-16 shrink-0">{e.ts.slice(11, 19)}</span>
+              <span className="text-accent shrink-0">{e.kind}</span>
+              <span className="text-dim break-all">{JSON.stringify(e.payload)}</span>
             </div>
           ))}
-        </pre>
+        </div>
       </details>
     </div>
   )
