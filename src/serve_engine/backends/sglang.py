@@ -6,6 +6,9 @@ from serve_engine.lifecycle.plan import DeploymentPlan
 
 class SGLangBackend(ContainerBackend):
     name = "sglang"
+    # SGLang's runtime adapter endpoints sit at root, NOT under /v1/.
+    adapter_load_path = "/load_lora_adapter"
+    adapter_unload_path = "/unload_lora_adapter"
 
     def build_argv(
         self,

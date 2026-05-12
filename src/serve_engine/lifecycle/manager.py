@@ -179,6 +179,7 @@ class LifecycleManager:
                 pinned=plan.pinned,
                 idle_timeout_s=plan.idle_timeout_s,
                 vram_reserved_mb=vram_mb,
+                max_loras=plan.max_loras,
             )
             dep_store.update_status(self._conn, dep.id, "loading")
             await self._emit(

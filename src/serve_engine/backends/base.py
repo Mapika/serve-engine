@@ -35,6 +35,10 @@ class ContainerBackend:
     # TRT-LLM overrides to False (its adapter story is on the legacy
     # AOT-engine path, incompatible with our PyTorch-backend deployments).
     supports_adapters: ClassVar[bool] = True
+    # Per-engine HTTP paths for dynamic adapter load/unload. vLLM uses
+    # /v1/* paths; SGLang uses bare paths. Override per backend.
+    adapter_load_path: ClassVar[str] = "/v1/load_lora_adapter"
+    adapter_unload_path: ClassVar[str] = "/v1/unload_lora_adapter"
 
     def __init__(self, manifest: EngineManifest | None = None):
         if manifest is None:
