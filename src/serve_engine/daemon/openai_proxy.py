@@ -21,6 +21,7 @@ from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import key_usage as _key_usage_store
 from serve_engine.store import models as model_store
+from serve_engine.store import usage_events as _usage_events_store
 
 router = APIRouter()
 
@@ -83,10 +84,11 @@ async def _proxy(
     # If adapter requested, ensure it's loaded into the chosen deployment.
     # This is the hot-load path: ~100-500ms for the first request to a
     # given adapter; sub-second on subsequent requests (already loaded).
+    cold_loaded = False
     if target.adapter_name:
         manager = request.app.state.manager
         try:
-            await ensure_adapter_loaded(
+            cold_loaded = await ensure_adapter_loaded(
                 conn, backend, active, target.adapter_name,
                 models_dir=manager._models_dir,
             )
@@ -97,6 +99,18 @@ async def _proxy(
 
     dep_store.touch_last_request(conn, active.id)
     request.app.state.request_count += 1
+    # Sub-project C: log this request for the predictor. Note we don't
+    # know the final token counts yet — they're patched in by the usage
+    # tracker after the stream completes (see streamer's finally block).
+    _usage_events_store.record(
+        conn,
+        model_name=model_name,
+        base_name=target.base_model_name,
+        adapter_name=target.adapter_name,
+        deployment_id=active.id,
+        api_key_id=key.id if key is not None else None,
+        cold_loaded=cold_loaded,
+    )
 
     # Rewrite the upstream payload's `model` field to the adapter name
     # when an adapter is in play — vLLM/SGLang both treat the OpenAI

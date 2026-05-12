@@ -128,11 +128,15 @@ async def ensure_adapter_loaded(
     adapter_name: str,
     *,
     models_dir: Path,
-) -> None:
+) -> bool:
     """If `adapter_name` isn't already loaded into `deployment`, hot-load it
     (evicting the LRU adapter if slots are full). Engine is contacted via
     its dynamic load/unload HTTP endpoints. Junction-row state is updated
-    on success. Touches last_used_at if already loaded."""
+    on success. Touches last_used_at if already loaded.
+
+    Returns True if a load was triggered (the request paid hot-load
+    latency, ~100-500ms), False if the adapter was already loaded.
+    Sub-project C's predictor uses this signal as `cold_loaded`."""
     a = ad_store.get_by_name(conn, adapter_name)
     if a is None:
         raise UnknownModel(f"adapter {adapter_name!r} not registered")
@@ -145,7 +149,7 @@ async def ensure_adapter_loaded(
     loaded_ids = da_store.find_deployments_with_adapter(conn, a.id)
     if deployment.id in loaded_ids:
         da_store.touch(conn, deployment.id, a.id)
-        return
+        return False
 
     # Need to load. Evict LRU if slots full.
     if da_store.count_for_deployment(conn, deployment.id) >= deployment.max_loras:
@@ -159,6 +163,7 @@ async def ensure_adapter_loaded(
     )
     await _engine_load(backend, deployment, a.name, container_path)
     da_store.attach(conn, deployment.id, a.id)
+    return True
 
 
 async def _engine_load(
