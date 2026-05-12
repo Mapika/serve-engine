@@ -296,9 +296,10 @@ def create_adapter(
 
 
 @router.delete("/adapters/{name}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_adapter(
+async def delete_adapter(
     name: str,
     force: bool = False,
+    backends: dict[str, Backend] = Depends(get_backends),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     a = ad_store.get_by_name(conn, name)
@@ -311,10 +312,21 @@ def delete_adapter(
             f"adapter {name!r} is loaded into deployments {deps}; "
             f"hot-unload first or pass ?force=true",
         )
-    # `force` cascade: drop junction rows so engines stop seeing the adapter,
-    # then delete the registry row. Note the adapter blob on disk is NOT
-    # auto-deleted — operator can clean up via the HF cache directly.
+    # `force` cascade: hot-unload from each engine, drop junction rows, then
+    # delete the registry row. Adapter blob on disk is NOT auto-deleted —
+    # operator can clean up via the HF cache directly.
     for dep_id in deps:
+        dep = dep_store.get_by_id(conn, dep_id)
+        if dep is not None:
+            backend = backends.get(dep.backend)
+            if backend is not None:
+                # Best-effort: even if the engine unload fails, we still want
+                # to drop the junction so the registry isn't lying about
+                # what's loaded.
+                try:
+                    await _engine_unload_adapter(backend, dep, a.name)
+                except HTTPException:
+                    pass
         da_store.detach(conn, dep_id, a.id)
     ad_store.delete(conn, a.id)
 
