@@ -7,7 +7,13 @@ from serve_engine.lifecycle.plan import DeploymentPlan
 class SGLangBackend(ContainerBackend):
     name = "sglang"
 
-    def build_argv(self, plan: DeploymentPlan, *, local_model_path: str) -> list[str]:
+    def build_argv(
+        self,
+        plan: DeploymentPlan,
+        *,
+        local_model_path: str,
+        config_path: str | None = None,  # SGLang doesn't use a YAML config file
+    ) -> list[str]:
         # The lmsysorg/sglang image's ENTRYPOINT is nvidia_entrypoint.sh which
         # `exec`s its argv. Unlike vLLM's image, it does NOT embed the launcher,
         # so we must include `python3 -m sglang.launch_server` ourselves.

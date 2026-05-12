@@ -99,3 +99,48 @@ def test_extra_args_overrides_backend_emission_no_duplicate_flag():
     occurrences = [i for i, x in enumerate(argv) if x == "--kv_cache_free_gpu_memory_fraction"]
     assert len(occurrences) == 1, f"flag duplicated: {argv}"
     assert argv[occurrences[0] + 1] == "0.85"
+
+
+def test_engine_config_enables_iter_perf_stats():
+    """enable_iter_perf_stats is what populates /metrics on the TRT-LLM
+    PyTorch backend; without it the endpoint returns []. Must be on so
+    observability works out of the box."""
+    cfg = TRTLLMBackend().engine_config(_plan())
+    assert cfg is not None
+    assert cfg["enable_iter_perf_stats"] is True
+    assert cfg["print_iter_log"] is True  # also handy for `serve logs`
+
+
+def test_engine_config_cuda_graph_batch_sizes_cover_target_concurrency():
+    """Padding requires precomputed graphs at every plausible batch size up to
+    target_concurrency; otherwise requests above the largest precomputed size
+    fall off the cuda-graph fast path."""
+    cfg = TRTLLMBackend().engine_config(_plan(target_concurrency=73))
+    sizes = cfg["cuda_graph_config"]["batch_sizes"]
+    assert sizes == sorted(sizes)
+    assert sizes[0] == 1
+    assert sizes[-1] == 73, f"largest graph must equal max_batch_size: {sizes}"
+    assert cfg["cuda_graph_config"]["enable_padding"] is True
+
+
+def test_engine_config_batch_sizes_pure_power_of_two_target():
+    """When target_concurrency is itself a power of two, no extra duplicate."""
+    cfg = TRTLLMBackend().engine_config(_plan(target_concurrency=64))
+    assert cfg["cuda_graph_config"]["batch_sizes"] == [1, 2, 4, 8, 16, 32, 64]
+
+
+def test_build_argv_includes_config_flag_when_path_given():
+    """When the manager hands us a config_path, --config <path> appears once."""
+    argv = TRTLLMBackend().build_argv(
+        _plan(), local_model_path="/models/x",
+        config_path="/serve/configs/42.yml",
+    )
+    i = argv.index("--config")
+    assert argv[i + 1] == "/serve/configs/42.yml"
+    assert argv.count("--config") == 1
+
+
+def test_build_argv_omits_config_flag_when_path_none():
+    """No --config when manager doesn't pass one (defensive default)."""
+    argv = TRTLLMBackend().build_argv(_plan(), local_model_path="/models/x")
+    assert "--config" not in argv

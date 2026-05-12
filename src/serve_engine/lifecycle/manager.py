@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import httpx
+import yaml
 
 from serve_engine.backends.base import Backend
 from serve_engine.lifecycle.docker_client import DockerClient
@@ -63,11 +64,15 @@ class LifecycleManager:
         topology: Topology | None = None,
         load_timeout_s: float = 600.0,
         event_bus: EventBus | None = None,
+        configs_dir: Path | None = None,
     ):
         self._conn = conn
         self._docker = docker_client
         self._backends = backends
         self._models_dir = models_dir
+        # Per-deployment engine YAML configs, mounted into containers at
+        # /serve/configs:ro. Backends opt-in via engine_config(plan).
+        self._configs_dir = configs_dir or (models_dir.parent / "configs")
         self._topology = topology
         self._load_timeout_s = load_timeout_s
         self._events = event_bus
@@ -209,13 +214,31 @@ class LifecycleManager:
                 gpu_memory_utilization=mem_util,
                 target_concurrency=target_concurrency,
             )
+            # 6. Per-deployment engine YAML (TRT-LLM uses --config to enable
+            # iter-perf stats and the CUDA-graph batch-size ladder). Backends
+            # that don't need a config return None from engine_config().
+            container_config_path: str | None = None
+            volumes = {str(self._models_dir.resolve()): {"bind": "/cache", "mode": "ro"}}
+            cfg = backend.engine_config(effective_plan)
+            if cfg is not None:
+                self._configs_dir.mkdir(parents=True, exist_ok=True)
+                host_cfg = self._configs_dir / f"{dep.id}.yml"
+                host_cfg.write_text(yaml.safe_dump(cfg, sort_keys=True))
+                container_config_path = f"/serve/configs/{dep.id}.yml"
+                volumes[str(self._configs_dir.resolve())] = {
+                    "bind": "/serve/configs", "mode": "ro",
+                }
             handle = self._docker.run(
                 image=plan.image_tag,
                 name=f"serve-{plan.backend}-{plan.model_name}-{dep.id}",
-                command=backend.build_argv(effective_plan, local_model_path=container_model_path),
+                command=backend.build_argv(
+                    effective_plan,
+                    local_model_path=container_model_path,
+                    config_path=container_config_path,
+                ),
                 environment=backend.container_env(effective_plan),
                 kwargs=backend.container_kwargs(effective_plan),
-                volumes={str(self._models_dir.resolve()): {"bind": "/cache", "mode": "ro"}},
+                volumes=volumes,
                 internal_port=backend.internal_port,
             )
             dep_store.set_container(
@@ -312,5 +335,12 @@ class LifecycleManager:
         dep_store.update_status(self._conn, dep.id, "stopping")
         if dep.container_id:
             self._docker.stop(dep.container_id, timeout=30)
+        # Remove the per-deployment engine config file if one was written.
+        cfg_path = self._configs_dir / f"{dep.id}.yml"
+        if cfg_path.exists():
+            try:
+                cfg_path.unlink()
+            except OSError:
+                pass
         dep_store.update_status(self._conn, dep.id, "stopped")
         await self._emit("deployment.stopped", dep_id=dep_id)

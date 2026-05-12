@@ -48,6 +48,7 @@ def build_apps(
     backends: dict[str, Backend],
     models_dir: Path,
     topology: Topology | None = None,
+    configs_dir: Path | None = None,
 ) -> tuple[FastAPI, FastAPI]:
     """Returns (tcp_app, uds_app) sharing the same LifecycleManager.
 
@@ -64,6 +65,7 @@ def build_apps(
         models_dir=models_dir,
         topology=topology,
         event_bus=event_bus,
+        configs_dir=configs_dir,
     )
 
     from serve_engine.lifecycle.reaper import Reaper

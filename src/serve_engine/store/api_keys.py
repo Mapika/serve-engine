@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import secrets
 import sqlite3
 from dataclasses import dataclass
@@ -94,6 +93,14 @@ def verify(conn: sqlite3.Connection, secret: str) -> ApiKey | None:
 
     SELECT and UPDATE run inside a single locked section so the row read
     cannot be invalidated by a concurrent write from another worker thread.
+
+    Security note: there is no post-DB hmac.compare_digest because the SELECT
+    already filtered on `key_hash=?` (byte-exact). What we'd be comparing is
+    two SHA-256 hex digests known to be equal — not the user-provided secret.
+    Constant-time concerns apply to the *secret* string only; here the secret
+    has already been hashed to a fixed-length digest before any comparison.
+    If the SELECT predicate is ever loosened (LIKE, prefix match, etc.) this
+    decision must be revisited.
     """
     candidate_hash = _hash(secret)
     with conn.locked():
@@ -102,8 +109,6 @@ def verify(conn: sqlite3.Connection, secret: str) -> ApiKey | None:
             (candidate_hash,),
         ).fetchone()
         if row is None:
-            return None
-        if not hmac.compare_digest(row["key_hash"], candidate_hash):
             return None
         conn.execute(
             "UPDATE api_keys SET last_used_at=CURRENT_TIMESTAMP WHERE id=?",

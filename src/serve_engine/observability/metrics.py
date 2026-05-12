@@ -30,9 +30,16 @@ def format_daemon_metrics(
 
 
 async def fetch_engine_metrics(base_url: str, path: str = "/metrics") -> str:
-    """Best-effort fetch of an engine's Prometheus metrics. Returns '' on failure."""
+    """Best-effort fetch of an engine's metrics. Returns '' on failure.
+
+    Timeout is 5s, not the typical Prometheus 2s, because TRT-LLM's /metrics
+    on the PyTorch backend blocks waiting for the next iteration to complete
+    and routinely takes 3-4s under light load. vLLM and SGLang respond in
+    well under 100ms; the 5s ceiling only matters for slow engines and is
+    well within Prometheus' default scrape_timeout.
+    """
     try:
-        async with httpx.AsyncClient(timeout=2.0) as c:
+        async with httpx.AsyncClient(timeout=5.0) as c:
             r = await c.get(base_url.rstrip("/") + path)
             if r.status_code == 200:
                 return r.text

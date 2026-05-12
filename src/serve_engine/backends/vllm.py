@@ -7,7 +7,13 @@ from serve_engine.lifecycle.plan import DeploymentPlan
 class VLLMBackend(ContainerBackend):
     name = "vllm"
 
-    def build_argv(self, plan: DeploymentPlan, *, local_model_path: str) -> list[str]:
+    def build_argv(
+        self,
+        plan: DeploymentPlan,
+        *,
+        local_model_path: str,
+        config_path: str | None = None,  # vLLM doesn't use a YAML config file
+    ) -> list[str]:
         argv: list[str] = [
             "--model", local_model_path,
             "--tensor-parallel-size", str(plan.tensor_parallel),

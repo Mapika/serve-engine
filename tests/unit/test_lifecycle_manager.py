@@ -245,3 +245,124 @@ def test_stop_all_stops_every_ready(conn, monkeypatch, tmp_path, topo_one_gpu):
     statuses = [dep.status for dep in dep_store.list_all(conn)]
     assert all(s == "stopped" for s in statuses)
     assert docker_client.stop.call_count == 3
+
+
+
+def test_load_writes_engine_config_yaml_and_mounts_it(conn, monkeypatch, tmp_path, topo_one_gpu):
+    """Backends that return engine_config() get a per-deployment YAML written
+    to configs_dir, mounted at /serve/configs:ro, and --config <in-container path>
+    threaded through build_argv. TRT-LLM is the consumer; this test uses a
+    minimal stub backend so we can assert without pulling the trtllm image."""
+    import yaml
+
+    from serve_engine.backends.base import ContainerBackend
+
+    class _StubBackendWithConfig(ContainerBackend):
+        name = "stubcfg"
+
+        def __init__(self):
+            from serve_engine.backends.manifest import EngineManifest, Headroom
+            self.manifest = EngineManifest(
+                name="stubcfg", image="stub", pinned_tag="v1",
+                health_path="/health", openai_base="/v1",
+                metrics_path="/metrics", internal_port=8000,
+                headroom=Headroom(factor=1.5, min_extra_mb=2048, min_floor_pct=15),
+            )
+
+        def build_argv(self, plan, *, local_model_path, config_path=None):
+            argv = ["serve", local_model_path]
+            if config_path is not None:
+                argv.extend(["--config", config_path])
+            return argv
+
+        def engine_config(self, plan):
+            return {"hello": "world", "n": plan.target_concurrency}
+
+    # Allow the stub backend through DeploymentPlan validation.
+    import serve_engine.lifecycle.plan as plan_mod
+    monkeypatch.setattr(plan_mod, "SUPPORTED_BACKENDS", ("vllm", "sglang", "trtllm", "stubcfg"))
+
+    docker_client = MagicMock()
+    docker_client.run.return_value = ContainerHandle(
+        id="cid", name="stub", address="127.0.0.1", port=49152,
+    )
+    _patch_externals(monkeypatch, tmp_path, vram_mb=20_000)
+
+    configs_dir = tmp_path / "configs"
+    mgr = LifecycleManager(
+        conn=conn, docker_client=docker_client,
+        backends={"stubcfg": _StubBackendWithConfig()},
+        models_dir=tmp_path, topology=topo_one_gpu,
+        configs_dir=configs_dir,
+    )
+    model_store.add(conn, name="m", hf_repo="x/y")
+    plan = replace(_make_plan(), model_name="m", hf_repo="x/y", backend="stubcfg")
+    dep = asyncio.run(mgr.load(plan))
+
+    # Config file written with the backend's dict serialized as YAML.
+    written = configs_dir / f"{dep.id}.yml"
+    assert written.exists(), f"no config at {written}"
+    payload = yaml.safe_load(written.read_text())
+    assert payload["hello"] == "world"
+    # `n` came from plan.target_concurrency. With no config.json on the stub
+    # weights dir, default_target_concurrency falls back to floor=8.
+    assert payload["n"] == 8
+
+    # Manager mounted configs_dir at /serve/configs:ro and passed the in-container
+    # path to build_argv via --config.
+    call = docker_client.run.call_args
+    volumes = call.kwargs["volumes"]
+    assert str(configs_dir.resolve()) in volumes
+    assert volumes[str(configs_dir.resolve())] == {"bind": "/serve/configs", "mode": "ro"}
+    cmd = call.kwargs["command"]
+    i = cmd.index("--config")
+    assert cmd[i + 1] == f"/serve/configs/{dep.id}.yml"
+
+
+def test_stop_removes_engine_config_yaml(conn, monkeypatch, tmp_path, topo_one_gpu):
+    """Per-deployment config files are cleaned up on stop so configs_dir
+    doesn't accumulate stale files across many load/stop cycles."""
+    from serve_engine.backends.base import ContainerBackend
+
+    class _StubBackend(ContainerBackend):
+        name = "stubcfg2"
+
+        def __init__(self):
+            from serve_engine.backends.manifest import EngineManifest, Headroom
+            self.manifest = EngineManifest(
+                name="stubcfg2", image="stub", pinned_tag="v1",
+                health_path="/health", openai_base="/v1",
+                metrics_path="/metrics", internal_port=8000,
+                headroom=Headroom(factor=1.5, min_extra_mb=2048, min_floor_pct=15),
+            )
+
+        def build_argv(self, plan, *, local_model_path, config_path=None):
+            return ["serve", local_model_path]
+
+        def engine_config(self, plan):
+            return {"k": "v"}
+
+    import serve_engine.lifecycle.plan as plan_mod
+    monkeypatch.setattr(plan_mod, "SUPPORTED_BACKENDS", ("vllm", "sglang", "trtllm", "stubcfg2"))
+
+    docker_client = MagicMock()
+    docker_client.run.return_value = ContainerHandle(
+        id="cid", name="stub", address="127.0.0.1", port=49152,
+    )
+    _patch_externals(monkeypatch, tmp_path, vram_mb=20_000)
+
+    configs_dir = tmp_path / "configs"
+    mgr = LifecycleManager(
+        conn=conn, docker_client=docker_client,
+        backends={"stubcfg2": _StubBackend()},
+        models_dir=tmp_path, topology=topo_one_gpu,
+        configs_dir=configs_dir,
+    )
+    model_store.add(conn, name="m", hf_repo="x/y")
+    plan = replace(_make_plan(), model_name="m", hf_repo="x/y", backend="stubcfg2")
+    dep = asyncio.run(mgr.load(plan))
+    cfg = configs_dir / f"{dep.id}.yml"
+    assert cfg.exists()
+
+    asyncio.run(mgr.stop(dep.id))
+    assert not cfg.exists(), "config file should be cleaned up on stop"

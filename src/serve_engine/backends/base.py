@@ -17,9 +17,12 @@ class Backend(Protocol):
     internal_port: int
     headroom: Headroom
 
-    def build_argv(self, plan: DeploymentPlan, *, local_model_path: str) -> list[str]: ...
+    def build_argv(
+        self, plan: DeploymentPlan, *, local_model_path: str, config_path: str | None = None,
+    ) -> list[str]: ...
     def container_env(self, plan: DeploymentPlan) -> dict[str, str]: ...
     def container_kwargs(self, plan: DeploymentPlan) -> dict[str, object]: ...
+    def engine_config(self, plan: DeploymentPlan) -> dict | None: ...
 
 
 class ContainerBackend:
@@ -57,8 +60,24 @@ class ContainerBackend:
     def headroom(self) -> Headroom:
         return self.manifest.headroom
 
-    def build_argv(self, plan: DeploymentPlan, *, local_model_path: str) -> list[str]:
+    def build_argv(
+        self,
+        plan: DeploymentPlan,
+        *,
+        local_model_path: str,
+        config_path: str | None = None,
+    ) -> list[str]:
         raise NotImplementedError
+
+    def engine_config(self, plan: DeploymentPlan) -> dict | None:
+        """Optional per-deployment YAML config for the engine.
+
+        Backends that support a `--config <file>` flag (or equivalent) can
+        return a dict here; the manager serializes it to YAML, mounts it
+        into the container, and passes the in-container path to build_argv
+        as `config_path=`. Returning None means no config file is needed.
+        """
+        return None
 
     def container_env(self, plan: DeploymentPlan) -> dict[str, str]:
         return {}
