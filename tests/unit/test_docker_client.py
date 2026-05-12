@@ -78,3 +78,13 @@ def test_stop_is_idempotent_for_missing_container(fake_docker):
     fake_docker.containers.get.side_effect = NotFound("gone")
     dc = DockerClient(client=fake_docker, network_name="serve-engines")
     dc.stop("abc123", timeout=10)  # must not raise
+
+
+def test_stop_preserves_container_when_remove_false(fake_docker):
+    """Used by the failed-load path so engine logs survive for inspection."""
+    container = MagicMock()
+    fake_docker.containers.get.return_value = container
+    dc = DockerClient(client=fake_docker, network_name="serve-engines")
+    dc.stop("abc123", timeout=10, remove=False)
+    container.stop.assert_called_once_with(timeout=10)
+    container.remove.assert_not_called()

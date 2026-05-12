@@ -223,8 +223,16 @@ class LifecycleManager:
             health_url = f"http://{handle.address}:{handle.port}{backend.health_path}"
             ok = await wait_healthy(health_url, timeout_s=self._load_timeout_s)
             if not ok:
-                self._docker.stop(handle.id, timeout=10)
-                msg = f"engine did not become healthy within load timeout ({health_url})"
+                # Leave the failed container around so its logs survive — without
+                # them, "engine did not become healthy" is unactionable. The
+                # operator can `docker logs <name>` to find the real error, then
+                # `serve stop <id>` (which removes the container) when done.
+                self._docker.stop(handle.id, timeout=10, remove=False)
+                msg = (
+                    f"engine did not become healthy within load timeout "
+                    f"({health_url}); container {handle.name} preserved for "
+                    f"inspection (`docker logs {handle.name}`)"
+                )
                 dep_store.update_status(self._conn, dep.id, "failed", last_error=msg)
                 await self._emit("deployment.failed", dep_id=dep.id, error=msg)
                 raise RuntimeError(msg)

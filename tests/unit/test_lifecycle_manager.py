@@ -147,6 +147,10 @@ def test_load_marks_failed_on_unhealthy(conn, monkeypatch, tmp_path, topo_one_gp
     with pytest.raises(RuntimeError, match="did not become healthy"):
         asyncio.run(mgr.load(_make_plan()))
     docker_client.stop.assert_called_once()
+    # Failed-load containers MUST be preserved (remove=False) so the engine
+    # logs survive for `docker logs` inspection — otherwise root cause is lost.
+    stop_kwargs = docker_client.stop.call_args.kwargs
+    assert stop_kwargs.get("remove") is False, stop_kwargs
     assert dep_store.find_active(conn) is None
 
 

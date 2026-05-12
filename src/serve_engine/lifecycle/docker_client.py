@@ -73,13 +73,24 @@ class DockerClient:
             port=host_port,
         )
 
-    def stop(self, container_id: str, *, timeout: int = 30) -> None:
+    def stop(
+        self,
+        container_id: str,
+        *,
+        timeout: int = 30,
+        remove: bool = True,
+    ) -> None:
+        """Stop a container. Removes it by default; pass remove=False to keep
+        the stopped container around (e.g. so failed-load engine logs survive
+        for `docker logs <name>` inspection).
+        """
         try:
             c = self._client.containers.get(container_id)
         except NotFound:
             return
         c.stop(timeout=timeout)
-        c.remove()
+        if remove:
+            c.remove()
 
     def stream_logs(self, container_id: str, *, follow: bool = False) -> Iterator[bytes]:
         c = self._client.containers.get(container_id)
