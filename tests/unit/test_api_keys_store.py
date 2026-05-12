@@ -66,3 +66,32 @@ def test_count_active(tmp_path):
     assert api_keys.count_active(conn) == 2
     api_keys.revoke(conn, k1.id)
     assert api_keys.count_active(conn) == 1
+
+
+def test_concurrent_verify_and_count_does_not_corrupt_cursor(tmp_path):
+    """Regression: dashboard 500s on stop/restart were caused by concurrent
+    sqlite3 access from FastAPI's worker-thread pool. With the LockedConnection
+    wrapper, hammering verify+count_active from many threads must never raise
+    InterfaceError or return None for COUNT(*)."""
+    import threading
+
+    conn = _fresh(tmp_path)
+    secret, _ = api_keys.create(conn, name="hot", tier="standard")
+    errors: list[BaseException] = []
+
+    def hammer():
+        try:
+            for _ in range(200):
+                k = api_keys.verify(conn, secret)
+                assert k is not None and k.name == "hot"
+                n = api_keys.count_active(conn)
+                assert n == 1, f"got {n!r}"
+        except BaseException as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=hammer) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, errors[:3]

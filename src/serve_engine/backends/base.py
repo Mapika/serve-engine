@@ -80,8 +80,27 @@ class ContainerBackend:
     @staticmethod
     def _append_extra(argv: list[str], extra: dict[str, str]) -> None:
         """Append user-provided extra_args from the deployment plan.
-        Empty value means bare flag (e.g. --enable-expert-parallel)."""
+
+        Empty value means bare flag (e.g. --enable-expert-parallel).
+
+        If the backend already emitted the same flag, the earlier emission
+        (and its value) is removed first so the user override wins cleanly
+        instead of relying on argparse last-value-wins semantics — strict
+        argparsers (some TRT-LLM versions) reject duplicate flags outright.
+        Heuristic for "next token is the flag's value": doesn't start with
+        '--'. Engine flag values are paths/numbers/dtype names; collisions
+        are not a real concern.
+        """
         for k, v in extra.items():
+            i = 0
+            while i < len(argv):
+                if argv[i] == k:
+                    if i + 1 < len(argv) and not argv[i + 1].startswith("--"):
+                        del argv[i:i + 2]
+                    else:
+                        del argv[i]
+                else:
+                    i += 1
             if v == "":
                 argv.append(k)
             else:

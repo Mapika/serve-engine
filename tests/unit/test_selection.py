@@ -56,5 +56,20 @@ def test_case_insensitive(tmp_path):
 
 def test_load_default_path_uses_package_resource():
     cfg = load_selection()
-    assert cfg.default in ("vllm", "sglang")
+    assert cfg.default in ("vllm", "sglang", "trtllm")
     assert isinstance(cfg.rules, list)
+
+
+def test_packaged_rules_route_nvfp4_and_nvidia_to_trtllm():
+    """Packaged selection.yaml ships sane defaults for TRT-LLM checkpoints."""
+    cfg = load_selection()
+    assert pick_backend(cfg, "nvidia/Llama-4-Maverick-17B-128E-Instruct-FP8") == "trtllm"
+    assert pick_backend(cfg, "meta-llama/Llama-3.1-70B-NVFP4") == "trtllm"
+    assert pick_backend(cfg, "qwen3-235b-fp4") == "trtllm"
+
+
+def test_packaged_rules_keep_sglang_for_deepseek():
+    """Confirm prior SGLang routing wasn't accidentally clobbered."""
+    cfg = load_selection()
+    assert pick_backend(cfg, "deepseek-v3-671b") == "sglang"
+    assert pick_backend(cfg, "deepseek-r1-zero") == "sglang"

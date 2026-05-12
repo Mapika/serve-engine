@@ -90,21 +90,26 @@ def get_by_id(conn: sqlite3.Connection, key_id: int) -> ApiKey | None:
 
 
 def verify(conn: sqlite3.Connection, secret: str) -> ApiKey | None:
-    """Look up a key by secret; returns None if missing or revoked."""
+    """Look up a key by secret; returns None if missing or revoked.
+
+    SELECT and UPDATE run inside a single locked section so the row read
+    cannot be invalidated by a concurrent write from another worker thread.
+    """
     candidate_hash = _hash(secret)
-    row = conn.execute(
-        "SELECT * FROM api_keys WHERE key_hash=? AND revoked_at IS NULL",
-        (candidate_hash,),
-    ).fetchone()
-    if row is None:
-        return None
-    if not hmac.compare_digest(row["key_hash"], candidate_hash):
-        return None
-    conn.execute(
-        "UPDATE api_keys SET last_used_at=CURRENT_TIMESTAMP WHERE id=?",
-        (row["id"],),
-    )
-    return _row_to_key(row)
+    with conn.locked():
+        row = conn.execute(
+            "SELECT * FROM api_keys WHERE key_hash=? AND revoked_at IS NULL",
+            (candidate_hash,),
+        ).fetchone()
+        if row is None:
+            return None
+        if not hmac.compare_digest(row["key_hash"], candidate_hash):
+            return None
+        conn.execute(
+            "UPDATE api_keys SET last_used_at=CURRENT_TIMESTAMP WHERE id=?",
+            (row["id"],),
+        )
+        return _row_to_key(row)
 
 
 def list_all(conn: sqlite3.Connection) -> list[ApiKey]:

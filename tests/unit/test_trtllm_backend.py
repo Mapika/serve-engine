@@ -86,3 +86,16 @@ def test_build_argv_extra_args_bare_flag():
     if idx + 1 < len(argv):
         assert argv[idx + 1].startswith("--")
     assert "" not in argv
+
+
+def test_extra_args_overrides_backend_emission_no_duplicate_flag():
+    """Regression: the backend emits --kv_cache_free_gpu_memory_fraction by
+    default. If --extra also sets it (e.g. for tuning), the result must be
+    a single occurrence with the user's value, not two."""
+    argv = TRTLLMBackend().build_argv(
+        _plan(extra_args={"--kv_cache_free_gpu_memory_fraction": "0.85"}),
+        local_model_path="/models/x",
+    )
+    occurrences = [i for i, x in enumerate(argv) if x == "--kv_cache_free_gpu_memory_fraction"]
+    assert len(occurrences) == 1, f"flag duplicated: {argv}"
+    assert argv[occurrences[0] + 1] == "0.85"

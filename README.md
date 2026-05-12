@@ -1,15 +1,15 @@
 # serve-engine
 
-A single-node, multi-user LLM inference orchestrator over vLLM and SGLang.
+A single-node, multi-user LLM inference orchestrator over vLLM, SGLang, and TensorRT-LLM.
 
-`serve-engine` solves the operator-UX gap left by `vllm serve` / `python -m sglang.launch_server`: one daemon, multiple models, pin / auto-swap lifecycle, OpenAI-compatible HTTP, API keys with proper rate limits, a small web UI, and live observability — on one GPU box.
+`serve-engine` solves the operator-UX gap left by `vllm serve` / `python -m sglang.launch_server` / `trtllm-serve`: one daemon, multiple models, pin / auto-swap lifecycle, OpenAI-compatible HTTP, API keys with proper rate limits, a small web UI, and live observability — on one GPU box.
 
-**Status:** all seven planned slices implemented and verified end-to-end on an NVIDIA H100. 131 unit + integration tests, ruff clean.
+**Status:** core lifecycle, observability, auth, and three engine backends (vLLM, SGLang, TensorRT-LLM) verified end-to-end on H100 and RTX PRO 6000 Blackwell. 156 unit + integration tests, ruff clean.
 
 ## What it does
 
 - **One daemon, many models.** Register N models, pin some, let the rest auto-swap on demand. KV-aware GPU placement picks where each model lands.
-- **Engine pluggability.** Same `/v1/chat/completions` API regardless of whether the model is served by vLLM or SGLang. Engine choice is per-model (`--engine vllm|sglang`) or YAML-driven by pattern (`backends/selection.yaml`).
+- **Engine pluggability.** Same `/v1/chat/completions` API regardless of whether the model is served by vLLM, SGLang, or TensorRT-LLM. Engine choice is per-model (`--engine vllm|sglang|trtllm`) or YAML-driven by pattern (`backends/selection.yaml`). Auto target-concurrency picks `--max-num-seqs` / `--max_batch_size` from model architecture so small models don't get the conservative 30B-class default.
 - **OpenAI-compatible.** Drop-in: anything that speaks the OpenAI API (Python SDK, JS SDK, LangChain, `curl`) just works. Auth via `Authorization: Bearer sk-...`.
 - **Real rate limits.** Eight-window sliding limiter (RPM, RPH, RPD, RPW × tokens and requests), per-tier defaults + per-key overrides, returns `429` with `Retry-After`.
 - **Crash-safe.** Graceful shutdown stops engines cleanly; startup reconciliation re-adopts surviving containers or marks orphans failed.

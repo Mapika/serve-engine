@@ -1,9 +1,21 @@
 # Model-pattern → preferred backend. First match wins.
-# Patterns are case-insensitive fnmatch globs.
+# Patterns are case-insensitive fnmatch globs against the registered model
+# name (or HF repo for unregistered loads). Override per-request with `--engine`.
 #
-# Defaults to vLLM unless a rule matches. Override per-request with `--engine`.
+# Default is vLLM. Rules below opt specific model families into the engine
+# that's empirically the best fit for their architecture / quantization.
 
 rules:
+  # NVIDIA-published TRT-LLM-optimized checkpoints. NVFP4/FP4 quantization
+  # is a TRT-LLM specialty (Hopper+/Blackwell-only); vLLM and SGLang have
+  # weaker support today.
+  - pattern: "nvidia/*"
+    backend: trtllm
+  - pattern: "*-nvfp4*"
+    backend: trtllm
+  - pattern: "*-fp4*"
+    backend: trtllm
+
   # Models that benefit from RadixAttention (multi-turn / agentic / long
   # shared prefixes). SGLang's prefix caching is more aggressive than vLLM's.
   - pattern: "*deepseek-v3*"
