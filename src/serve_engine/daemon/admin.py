@@ -88,6 +88,7 @@ class CreateDeploymentRequest(BaseModel):
     pinned: bool = False
     idle_timeout_s: int | None = None
     target_concurrency: int = 8
+    extra_args: dict[str, str] = {}
 
 
 class CreateModelRequest(BaseModel):
@@ -133,6 +134,7 @@ async def create_deployment(
             pinned=body.pinned,
             idle_timeout_s=body.idle_timeout_s,
             target_concurrency=body.target_concurrency,
+            extra_args=dict(body.extra_args),
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e

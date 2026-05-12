@@ -77,6 +77,46 @@ async def test_create_deployment(app):
 
 
 @pytest.mark.asyncio
+async def test_create_deployment_passes_extra_args_to_argv(app):
+    # The fixture's docker_client is a MagicMock; we capture argv via its
+    # .run side-effect so we can assert request-body extra_args reach the engine.
+    docker_client = app.state.manager._docker  # injected MagicMock
+    captured: dict[str, list[str]] = {}
+
+    def _spy(**kwargs):
+        captured["command"] = list(kwargs["command"])
+        return ContainerHandle(id="cid", name="x", address="127.0.0.1", port=49152)
+
+    docker_client.run.side_effect = _spy
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        r = await c.post(
+            "/admin/deployments",
+            json={
+                "model_name": "qwen36",
+                "hf_repo": "Qwen/Qwen3.6-35B-A3B-FP8",
+                "image_tag": "vllm/vllm-openai:v0.20.2",
+                "gpu_ids": [0],
+                "max_model_len": 65536,
+                "extra_args": {
+                    "--kv-cache-dtype": "fp8_e4m3",
+                    "--reasoning-parser": "qwen3",
+                    "--enable-expert-parallel": "",
+                },
+            },
+        )
+    assert r.status_code == 201, r.text
+    argv = captured["command"]
+    assert argv[argv.index("--kv-cache-dtype") + 1] == "fp8_e4m3"
+    assert argv[argv.index("--reasoning-parser") + 1] == "qwen3"
+    bare_idx = argv.index("--enable-expert-parallel")
+    if bare_idx + 1 < len(argv):
+        assert argv[bare_idx + 1].startswith("--")
+    assert "" not in argv
+
+
+@pytest.mark.asyncio
 async def test_list_models(app):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:

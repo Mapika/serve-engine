@@ -55,3 +55,22 @@ def test_default_image():
 
 def test_internal_port():
     assert SGLangBackend().internal_port == 30000
+
+
+def test_build_argv_extra_args_keyvalue():
+    argv = SGLangBackend().build_argv(
+        _plan(extra_args={"--kv-cache-dtype": "fp8_e4m3"}),
+        local_model_path="/models/x",
+    )
+    assert argv[argv.index("--kv-cache-dtype") + 1] == "fp8_e4m3"
+
+
+def test_build_argv_extra_args_bare_flag():
+    argv = SGLangBackend().build_argv(
+        _plan(extra_args={"--enable-torch-compile": ""}),
+        local_model_path="/models/x",
+    )
+    idx = argv.index("--enable-torch-compile")
+    if idx + 1 < len(argv):
+        assert argv[idx + 1].startswith("--")
+    assert "" not in argv

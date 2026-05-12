@@ -59,7 +59,10 @@ class SGLangBackend:
             "--disable-piecewise-cuda-graph",
         ]
         for k, v in plan.extra_args.items():
-            argv.extend([k, v])
+            if v == "":
+                argv.append(k)
+            else:
+                argv.extend([k, v])
         return argv
 
     def container_env(self, plan: DeploymentPlan) -> dict[str, str]:

@@ -55,7 +55,11 @@ class VLLMBackend:
         if plan.enable_chunked_prefill:
             argv.append("--enable-chunked-prefill")
         for k, v in plan.extra_args.items():
-            argv.extend([k, v])
+            # Empty value = bare flag (e.g. --enable-expert-parallel).
+            if v == "":
+                argv.append(k)
+            else:
+                argv.extend([k, v])
         return argv
 
     def container_env(self, plan: DeploymentPlan) -> dict[str, str]:

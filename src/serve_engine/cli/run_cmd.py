@@ -27,9 +27,36 @@ def run(
         None, "--engine",
         help="Force a specific engine (vllm | sglang). Default: auto-select.",
     ),
+    kv_cache_dtype: str = typer.Option(
+        None, "--kv-cache",
+        help="KV cache dtype passed to engine (e.g. 'fp8_e4m3'). "
+             "Shorthand for --extra '--kv-cache-dtype=...'.",
+    ),
+    extra: list[str] = typer.Option(
+        [], "--extra", "-x",
+        help="Raw engine flag, e.g. -x '--reasoning-parser=qwen3' "
+             "or -x '--enable-expert-parallel'. Repeatable.",
+    ),
 ):
     """Load a model and make it active. Stops the current model first."""
     gpu_ids = [int(g) for g in gpu.split(",") if g.strip()]
+    extra_args: dict[str, str] = {}
+    for raw in extra:
+        s = raw.strip()
+        if not s.startswith("--"):
+            typer.echo(
+                f"--extra value {raw!r} must start with '--' "
+                "(e.g. --extra '--kv-cache-dtype=fp8_e4m3')",
+                err=True,
+            )
+            raise typer.Exit(1)
+        if "=" in s:
+            k, v = s.split("=", 1)
+            extra_args[k] = v
+        else:
+            extra_args[s] = ""
+    if kv_cache_dtype is not None:
+        extra_args["--kv-cache-dtype"] = kv_cache_dtype
     if "/" in name_or_repo:
         hf_repo = name_or_repo
         local_name = hf_repo.split("/")[-1].lower()
@@ -60,6 +87,8 @@ def run(
         body["image_tag"] = image_tag
     if engine is not None:
         body["backend"] = engine
+    if extra_args:
+        body["extra_args"] = extra_args
 
     typer.echo(f"loading {local_name} on GPU(s) {gpu_ids} ...")
     try:

@@ -48,3 +48,25 @@ def test_container_kwargs_gpu_request():
 
 def test_default_image():
     assert VLLMBackend().image_default.startswith("vllm/vllm-openai:")
+
+
+def test_build_argv_extra_args_keyvalue():
+    argv = VLLMBackend().build_argv(
+        _plan(extra_args={"--kv-cache-dtype": "fp8_e4m3", "--reasoning-parser": "qwen3"}),
+        local_model_path="/models/x",
+    )
+    assert argv[argv.index("--kv-cache-dtype") + 1] == "fp8_e4m3"
+    assert argv[argv.index("--reasoning-parser") + 1] == "qwen3"
+
+
+def test_build_argv_extra_args_bare_flag():
+    # Empty value = bare boolean flag, no following value token.
+    argv = VLLMBackend().build_argv(
+        _plan(extra_args={"--enable-expert-parallel": ""}),
+        local_model_path="/models/x",
+    )
+    idx = argv.index("--enable-expert-parallel")
+    # Next token (if any) must be another flag, not an empty string.
+    if idx + 1 < len(argv):
+        assert argv[idx + 1].startswith("--")
+    assert "" not in argv
