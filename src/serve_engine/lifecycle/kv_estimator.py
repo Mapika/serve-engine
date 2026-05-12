@@ -37,32 +37,93 @@ def read_model_config(model_dir: Path) -> dict:
     return json.loads(p.read_text())
 
 
+def _arch_config(cfg: dict) -> dict:
+    """Multimodal HF configs nest the LM architecture under text_config."""
+    return cfg.get("text_config") or cfg
+
+
+def _weight_dtype_bytes(cfg: dict, dtype: str) -> int:
+    """Bytes-per-weight, taking checkpoint quantization into account.
+
+    The user-facing `dtype` flag describes compute precision; weights on disk
+    may be quantized lower. For sizing we want the on-disk footprint, so an
+    fp8-quantized checkpoint reports 1 byte regardless of the compute dtype.
+    """
+    qcfg = cfg.get("quantization_config") or {}
+    qmethod = (qcfg.get("quant_method") or "").lower()
+    if qmethod in ("fp8", "nvfp4", "fp4"):
+        return 1
+    text = _arch_config(cfg)
+    return _dtype_bytes(dtype, text.get("torch_dtype") or text.get("dtype"))
+
+
 def _estimate_param_bytes(cfg: dict, dtype_bytes: int) -> int:
     """Rough parameter count from config; used when safetensors metadata unavailable."""
-    L = int(cfg.get("num_hidden_layers", 0))
-    H = int(cfg.get("hidden_size", 0))
-    vocab = int(cfg.get("vocab_size", 0))
+    text = _arch_config(cfg)
+    L = int(text.get("num_hidden_layers", 0))
+    H = int(text.get("hidden_size", 0))
+    vocab = int(text.get("vocab_size") or cfg.get("vocab_size") or 0)
     if L == 0 or H == 0:
         return 0
-    backbone = 12 * L * H * H
+    n_heads = int(text.get("num_attention_heads", 1))
+    n_kv_heads = int(text.get("num_key_value_heads", n_heads))
+    head_dim = int(text.get("head_dim", H // n_heads if n_heads else 0))
+
+    # Attention (Q/K/V/O) — GQA-aware.
+    q_proj = H * n_heads * head_dim
+    kv_proj = H * n_kv_heads * head_dim * 2  # K and V
+    o_proj = n_heads * head_dim * H
+    attn_per_layer = q_proj + kv_proj + o_proj
+
+    # FFN: MoE replaces the dense FFN with N experts (+ optional shared).
+    n_experts = int(text.get("num_experts") or text.get("num_local_experts") or 0)
+    moe_inter = int(text.get("moe_intermediate_size") or 0)
+    shared_inter = int(text.get("shared_expert_intermediate_size") or 0)
+    if n_experts and moe_inter:
+        # 3 matrices (gate/up/down) per expert, each H x moe_inter.
+        ffn_per_layer = 3 * H * (n_experts * moe_inter + shared_inter)
+    else:
+        inter = int(text.get("intermediate_size", 4 * H))
+        ffn_per_layer = 3 * H * inter
+
     embed = vocab * H * 2  # input + output embeddings
-    return (backbone + embed) * dtype_bytes
+    return (L * (attn_per_layer + ffn_per_layer) + embed) * dtype_bytes
+
+
+def _count_attention_layers(cfg: dict) -> int:
+    """Count layers that hold a per-token KV cache.
+
+    Hybrid models (Qwen3.6, Granite-Hybrid, etc.) list per-layer types as
+    "full_attention"/"linear_attention" under text_config.layer_types — only
+    full-attention layers cache K/V per token; linear-attention layers hold a
+    fixed-size state cache that doesn't scale with sequence length.
+    """
+    text = _arch_config(cfg)
+    layer_types = text.get("layer_types")
+    n_layers = int(text.get("num_hidden_layers", 0))
+    if not layer_types:
+        return n_layers
+    return sum(1 for t in layer_types if "linear" not in str(t).lower())
 
 
 def estimate_vram_mb(inp: KVEstimateInput) -> int:
     cfg = read_model_config(inp.model_dir)
-    torch_dtype = cfg.get("torch_dtype")
-    dtype_bytes = _dtype_bytes(inp.dtype, torch_dtype)
+    text = _arch_config(cfg)
 
-    n_layers = int(cfg.get("num_hidden_layers", 0))
-    hidden = int(cfg.get("hidden_size", 0))
-    n_heads = int(cfg.get("num_attention_heads", 1))
-    n_kv_heads = int(cfg.get("num_key_value_heads", n_heads))
-    head_dim = int(cfg.get("head_dim", hidden // n_heads if n_heads else 0))
+    weight_bytes = _weight_dtype_bytes(cfg, inp.dtype)
+    kv_bytes_per_elem = _dtype_bytes(
+        inp.dtype, text.get("torch_dtype") or text.get("dtype"),
+    )
 
-    kv_bytes_per_token = 2 * n_layers * n_kv_heads * head_dim * dtype_bytes
+    hidden = int(text.get("hidden_size", 0))
+    n_heads = int(text.get("num_attention_heads", 1))
+    n_kv_heads = int(text.get("num_key_value_heads", n_heads))
+    head_dim = int(text.get("head_dim", hidden // n_heads if n_heads else 0))
+
+    n_attn_layers = _count_attention_layers(cfg)
+    kv_bytes_per_token = 2 * n_attn_layers * n_kv_heads * head_dim * kv_bytes_per_elem
     kv_bytes = kv_bytes_per_token * inp.max_model_len * inp.target_concurrency
-    weights_bytes = _estimate_param_bytes(cfg, dtype_bytes)
+    weights_bytes = _estimate_param_bytes(cfg, weight_bytes)
 
     total = (weights_bytes + kv_bytes) * ACTIVATION_OVERHEAD
     return math.ceil(total / 1024 / 1024)
