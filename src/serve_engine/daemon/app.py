@@ -70,6 +70,7 @@ def build_apps(
         snapshots_dir=snapshots_dir,
     )
 
+    from serve_engine.lifecycle.predictor_task import PredictorTask
     from serve_engine.lifecycle.reaper import Reaper
     from serve_engine.lifecycle.snapshot_gc import SnapshotGc
     from serve_engine.store import deployments as _dep_store
@@ -85,6 +86,15 @@ def build_apps(
     snapshot_gc = SnapshotGc(
         conn=conn,
         cfg_path=_cfg.SERVE_DIR / "snapshots.yaml",
+    )
+    # Sub-project C: predictor pre-warms adapters every tick_interval_s
+    # using the rule-based scorer over usage_events. Disabled by default
+    # for installations that haven't accumulated enough history; flip
+    # via ~/.serve/predictor.yaml when ready.
+    predictor_task = PredictorTask(
+        conn=conn,
+        backends=backends,
+        models_dir=models_dir,
     )
 
     @asynccontextmanager
@@ -107,8 +117,10 @@ def build_apps(
             log.exception("startup snapshot gc failed; continuing")
         reaper.start()
         snapshot_gc.start()
+        predictor_task.start()
         yield
         # Shutdown
+        await predictor_task.stop()
         await snapshot_gc.stop()
         await reaper.stop()
         try:
