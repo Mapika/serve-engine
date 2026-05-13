@@ -179,15 +179,19 @@ class AdminClient:
                     )
                 await asyncio.sleep(poll_interval_s)
 
-    async def first_ttft(self, model_name: str) -> float:
+    async def first_ttft(self, model_name: str, api_key: str | None = None) -> float:
         """Send a chat completion, measure wallclock to first byte of the
         first SSE token chunk. Streams so we genuinely measure TTFT,
-        not full-response latency."""
+        not full-response latency. `api_key` is required when the daemon
+        has at least one key registered (the /v1/ surface enforces auth
+        in that case)."""
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         async with self._client() as c:
             t0 = time.monotonic()
             async with c.stream(
                 "POST",
                 "/v1/chat/completions",
+                headers=headers,
                 json={
                     "model": model_name,
                     "messages": [{"role": "user", "content": "Hi"}],
@@ -205,6 +209,20 @@ class AdminClient:
         async with self._client() as c:
             await c.delete(f"/admin/deployments/{dep_id}")
 
+    async def create_admin_key(self, name: str = "bench") -> tuple[int, str]:
+        """Create a one-shot admin key for the bench's chat calls. Returns
+        (key_id, secret). UDS path bypasses auth so this call works even
+        before any keys exist."""
+        async with self._client() as c:
+            r = await c.post("/admin/keys", json={"name": name, "tier": "admin"})
+            r.raise_for_status()
+            body = r.json()
+            return body["id"], body["secret"]
+
+    async def revoke_key(self, key_id: int) -> None:
+        async with self._client() as c:
+            await c.delete(f"/admin/keys/{key_id}")
+
 
 async def one_run(
     client: AdminClient,
@@ -214,16 +232,20 @@ async def one_run(
     gpu_id: int,
     poll_interval_s: float = 1.0,
     gpu_mem_util: float | None = None,
+    api_key: str | None = None,
 ) -> RunResult:
-    """One full timed cycle: create deployment → wait ready → measure TTFT → delete."""
+    """One full timed cycle: create deployment → wait ready → measure TTFT → delete.
+
+    Uses try/finally to guarantee the deployment is deleted even if TTFT
+    measurement raises (otherwise containers would leak across runs)."""
+    dep_id: int | None = None
     try:
         await client.ensure_model(model_name, hf_repo)
         t0 = time.monotonic()
         dep_id = await client.create_deployment(model_name, hf_repo, gpu_id, gpu_mem_util)
         await client.wait_ready(dep_id, poll_interval_s)
         ready_s = time.monotonic() - t0
-        ttft_s = await client.first_ttft(model_name)
-        await client.delete_deployment(dep_id)
+        ttft_s = await client.first_ttft(model_name, api_key=api_key)
         return RunResult(
             ready_s=ready_s,
             ttft_s=ttft_s,
@@ -233,6 +255,13 @@ async def one_run(
         )
     except Exception as e:
         return RunResult(ready_s=0.0, ttft_s=0.0, total_s=0.0, ok=False, error=str(e))
+    finally:
+        if dep_id is not None:
+            try:
+                await client.delete_deployment(dep_id)
+            except Exception:
+                # Cleanup-best-effort; main run already recorded.
+                pass
 
 
 def _purge_snapshots(snapshots_dir: Path) -> None:
@@ -275,8 +304,13 @@ async def benchmark(
     poll_interval_s: float = 1.0,
     snapshot_save_timeout_s: float = 120.0,
     gpu_mem_util: float | None = None,
+    api_key: str | None = None,
 ) -> dict[str, list[RunResult]]:
-    """Run `runs` cold passes then `runs` warm passes. Returns both lists."""
+    """Run `runs` cold passes then `runs` warm passes. Returns both lists.
+
+    If `api_key` is None and the daemon has keys registered (i.e. /v1/
+    requires Bearer), the chat completion calls will 401. The CLI wrapper
+    creates a one-shot key at start to avoid this."""
     client = AdminClient(sock)
 
     cold: list[RunResult] = []
@@ -289,6 +323,7 @@ async def benchmark(
             gpu_id=gpu_id,
             poll_interval_s=poll_interval_s,
             gpu_mem_util=gpu_mem_util,
+            api_key=api_key,
         )
         cold.append(r)
         # Give the daemon time to persist the snapshot before the next cold run
@@ -305,6 +340,7 @@ async def benchmark(
             gpu_id=gpu_id,
             poll_interval_s=poll_interval_s,
             gpu_mem_util=gpu_mem_util,
+            api_key=api_key,
         )
         warm.append(r)
 
@@ -348,15 +384,24 @@ def main() -> int:
     print(f"Running {args.runs} cold + {args.runs} warm passes for {hf_repo}")
     print(f"GPU: {gpu_fingerprint()}")
 
-    result = asyncio.run(benchmark(
-        sock=args.sock,
-        model_name=model_name,
-        hf_repo=hf_repo,
-        gpu_id=args.gpu_id,
-        runs=args.runs,
-        snapshots_dir=args.snapshots_dir,
-        gpu_mem_util=args.gpu_mem_util,
-    ))
+    async def run_with_temp_key() -> dict[str, list[RunResult]]:
+        client = AdminClient(args.sock)
+        key_id, secret = await client.create_admin_key("bench-snapshot")
+        try:
+            return await benchmark(
+                sock=args.sock,
+                model_name=model_name,
+                hf_repo=hf_repo,
+                gpu_id=args.gpu_id,
+                runs=args.runs,
+                snapshots_dir=args.snapshots_dir,
+                gpu_mem_util=args.gpu_mem_util,
+                api_key=secret,
+            )
+        finally:
+            await client.revoke_key(key_id)
+
+    result = asyncio.run(run_with_temp_key())
 
     cold_agg = aggregate(result["cold"])
     warm_agg = aggregate(result["warm"])
