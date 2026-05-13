@@ -15,6 +15,7 @@ from serve_engine.store import db
 from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
+from serve_engine.store import usage_events as ue_store
 
 
 @pytest.fixture
@@ -142,6 +143,98 @@ def _seed_with_rank(app, *, deployment_max_lora_rank: int):
     )
     dep_store.update_status(conn, dep.id, "ready")
     return base, dep
+
+
+@pytest.mark.asyncio
+async def test_proxy_populates_usage_events_tokens_in_streaming_mode(app, monkeypatch):
+    """In SSE streaming mode, OpenAI/vLLM/SGLang emit the usage chunk
+    BEFORE the terminal `data: [DONE]` frame. The tracker must keep the
+    usage-bearing event, not the [DONE] sentinel — otherwise the
+    predictor sees 0/0 for every streaming request."""
+    _seed(app, max_loras=0)
+    captured = {"chats": []}
+
+    class FakeStreamResp:
+        def __init__(self):
+            self.status_code = 200
+            self.headers = {"content-type": "text/event-stream"}
+
+        async def aiter_raw(self):
+            yield (
+                b'data: {"id":"x","choices":[{"delta":{"content":"hi"}}]}\n\n'
+            )
+            yield (
+                b'data: {"id":"x","choices":[],"usage":'
+                b'{"prompt_tokens":7,"completion_tokens":3}}\n\n'
+            )
+            yield b'data: [DONE]\n\n'
+
+    class FakeStreamCM:
+        async def __aenter__(self):
+            return FakeStreamResp()
+
+        async def __aexit__(self, *args):
+            return None
+
+    class FakeEngineClient:
+        def __init__(self, base_url):
+            self.base_url = base_url
+
+        def stream(self, method, path, *, content=None, headers=None):
+            captured["chats"].append({"path": path})
+            return FakeStreamCM()
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(
+        "serve_engine.daemon.openai_proxy.make_engine_client",
+        lambda base_url: FakeEngineClient(base_url),
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        async with c.stream(
+            "POST", "/v1/chat/completions",
+            json={
+                "model": "qwen3-test",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            },
+        ) as r:
+            async for _ in r.aiter_raw():
+                pass
+            assert r.status_code == 200
+
+    events = ue_store.list_recent(app.state.conn, limit=10)
+    assert len(events) == 1
+    assert events[0].tokens_in == 7
+    assert events[0].tokens_out == 3
+
+
+@pytest.mark.asyncio
+async def test_proxy_populates_usage_events_tokens_after_response(app, monkeypatch):
+    """Usage events get inserted at dispatch (tokens unknown) and patched
+    with upstream's `usage.prompt_tokens` / `usage.completion_tokens`
+    in the stream's finally block. Without this patch the predictor and
+    any future billing read 0/0 for every event."""
+    _seed(app, max_loras=0)
+    cap = _make_engine_intercept(monkeypatch, app)  # returns body with prompt=3,completion=1
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/v1/chat/completions",
+            json={"model": "qwen3-test", "messages": [{"role": "user", "content": "hi"}]},
+        )
+    assert r.status_code == 200, r.text
+    assert cap["chats"][0]["body"]["model"] == "qwen3-test"
+
+    events = ue_store.list_recent(app.state.conn, limit=10)
+    assert len(events) == 1
+    assert events[0].tokens_in == 3
+    assert events[0].tokens_out == 1
 
 
 @pytest.mark.asyncio

@@ -42,6 +42,28 @@ def test_record_writes_row(tmp_path):
     assert rows[0].deployment_id is None  # FK is nullable
 
 
+def test_record_returns_inserted_id(tmp_path):
+    """record() must return the new row id so callers (the proxy) can
+    patch in token counts after the upstream stream completes."""
+    conn = _fresh(tmp_path)
+    rid1 = ue.record(conn, model_name="m", base_name="m")
+    rid2 = ue.record(conn, model_name="m", base_name="m")
+    assert isinstance(rid1, int) and rid1 > 0
+    assert rid2 == rid1 + 1
+
+
+def test_set_tokens_patches_existing_row(tmp_path):
+    """The proxy inserts a usage row at request dispatch (before tokens
+    are known) and patches in tokens after the upstream stream completes.
+    set_tokens must update the existing row in place."""
+    conn = _fresh(tmp_path)
+    rid = ue.record(conn, model_name="m", base_name="m")
+    ue.set_tokens(conn, rid, tokens_in=42, tokens_out=17)
+    rows = ue.list_recent(conn, limit=10)
+    assert rows[0].tokens_in == 42
+    assert rows[0].tokens_out == 17
+
+
 def test_record_with_adapter(tmp_path):
     conn = _fresh(tmp_path)
     ue.record(

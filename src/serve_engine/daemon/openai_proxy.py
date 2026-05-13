@@ -99,10 +99,10 @@ async def _proxy(
 
     dep_store.touch_last_request(conn, active.id)
     request.app.state.request_count += 1
-    # Sub-project C: log this request for the predictor. Note we don't
-    # know the final token counts yet — they're patched in by the usage
-    # tracker after the stream completes (see streamer's finally block).
-    _usage_events_store.record(
+    # Sub-project C: log this request for the predictor. Tokens are 0 at
+    # this point — patched in below via set_tokens once the upstream
+    # stream completes and the usage tracker extracts them.
+    usage_event_id = _usage_events_store.record(
         conn,
         model_name=model_name,
         base_name=target.base_model_name,
@@ -160,8 +160,17 @@ async def _proxy(
         finally:
             await stream_cm.__aexit__(None, None, None)
             await client.aclose()
+            tin, tout = usage_tracker.extract()
+            # Patch the usage_events row Sub-project C inserted at dispatch
+            # so the predictor (and any future quota/billing) sees real
+            # token counts. Skipped only when extraction yielded 0/0 from
+            # a missing/incomplete usage block, where overwriting buys
+            # nothing.
+            if tin or tout:
+                _usage_events_store.set_tokens(
+                    conn, usage_event_id, tokens_in=tin, tokens_out=tout,
+                )
             if key is not None:
-                tin, tout = usage_tracker.extract()
                 _key_usage_store.record(
                     conn, key_id=key.id, tokens_in=tin, tokens_out=tout,
                     model_name=model_name,
@@ -198,13 +207,17 @@ class _UsageTracker:
             self._current.extend(chunk)
             # An event ends with a blank line (\n\n). When we see one,
             # the bytes before the blank line are the most recent event.
+            # Keep only events that carry a usage payload — providers
+            # like OpenAI/vLLM/SGLang emit the usage chunk BEFORE the
+            # terminal `data: [DONE]` frame, so blindly tracking the
+            # last event loses the tokens.
             while True:
                 idx = self._current.find(b"\n\n")
                 if idx < 0:
                     break
                 event = bytes(self._current[:idx])
                 del self._current[: idx + 2]
-                if b"data:" in event:
+                if b"data:" in event and b'"usage"' in event:
                     self._last_event = bytearray(event)
         else:
             if not self._json_overflow:

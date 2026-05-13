@@ -56,10 +56,13 @@ def record(
     tokens_in: int = 0,
     tokens_out: int = 0,
     cold_loaded: bool = False,
-) -> None:
+) -> int:
     """Insert one usage event. Hot path — called from the proxy on every
-    request. Keep this fast; no SELECTs, no JOINs."""
-    conn.execute(
+    request. Keep this fast; no SELECTs, no JOINs. Returns the new row id
+    so the caller can patch in token counts after the upstream stream
+    completes (the proxy doesn't know them at dispatch time).
+    """
+    cur = conn.execute(
         """
         INSERT INTO usage_events (
             api_key_id, model_name, base_name, adapter_name,
@@ -70,6 +73,19 @@ def record(
             api_key_id, model_name, base_name, adapter_name,
             deployment_id, tokens_in, tokens_out, 1 if cold_loaded else 0,
         ),
+    )
+    return int(cur.lastrowid or 0)
+
+
+def set_tokens(
+    conn: sqlite3.Connection, event_id: int, *, tokens_in: int, tokens_out: int,
+) -> None:
+    """Patch in upstream-reported token counts after the stream completes.
+    Called from the proxy's streamer finally-block, paired with the id
+    returned by `record()`. Idempotent — silently no-ops for unknown ids."""
+    conn.execute(
+        "UPDATE usage_events SET tokens_in=?, tokens_out=? WHERE id=?",
+        (tokens_in, tokens_out, event_id),
     )
 
 
