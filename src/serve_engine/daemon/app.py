@@ -71,10 +71,20 @@ def build_apps(
     )
 
     from serve_engine.lifecycle.reaper import Reaper
+    from serve_engine.lifecycle.snapshot_gc import SnapshotGc
     from serve_engine.store import deployments as _dep_store
     reaper = Reaper(
         manager=manager,
         list_ready=lambda: _dep_store.list_ready(conn),
+    )
+    # Snapshot eviction loop. Reads ~/.serve/snapshots.yaml each tick so
+    # operators can adjust keep_last_per_model / max_disk_gb without a
+    # daemon restart. Defaults to keep_last_per_model=2 + no disk cap;
+    # ticks every 6 hours.
+    from serve_engine import config as _cfg
+    snapshot_gc = SnapshotGc(
+        conn=conn,
+        cfg_path=_cfg.SERVE_DIR / "snapshots.yaml",
     )
 
     @asynccontextmanager
@@ -84,9 +94,22 @@ def build_apps(
             await manager.reconcile()
         except Exception:
             log.exception("reconcile failed; continuing")
+        # Run one GC pass at startup so a restarted daemon catches up on
+        # any snapshots that landed but exceeded policy since last tick.
+        try:
+            result = await snapshot_gc.tick_once()
+            if result["removed"] > 0:
+                log.info(
+                    "startup snapshot gc: removed %d, %d MB remaining",
+                    result["removed"], result["remaining_mb"],
+                )
+        except Exception:
+            log.exception("startup snapshot gc failed; continuing")
         reaper.start()
+        snapshot_gc.start()
         yield
         # Shutdown
+        await snapshot_gc.stop()
         await reaper.stop()
         try:
             await manager.stop_all()
