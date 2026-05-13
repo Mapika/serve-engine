@@ -20,6 +20,11 @@ class GPUInfo:
     index: int
     name: str
     total_mb: int
+    # CUDA compute capability as "{major}.{minor}" (e.g., "9.0" for H100,
+    # "12.0" for Blackwell). Feeds the snapshot key — restoring an
+    # H100-built snapshot on a Blackwell card would corrupt cuda graphs.
+    # Default is the empty marker for tests / mocks that don't care.
+    compute_cap: str = ""
 
 
 @dataclass(frozen=True)
@@ -84,7 +89,15 @@ def read_topology() -> Topology:
         name_raw = pynvml.nvmlDeviceGetName(h)
         name = name_raw.decode() if isinstance(name_raw, bytes) else str(name_raw)
         mem = pynvml.nvmlDeviceGetMemoryInfo(h)
-        gpus.append(GPUInfo(index=i, name=name, total_mb=int(mem.total) // 1024 // 1024))
+        try:
+            major, minor = pynvml.nvmlDeviceGetCudaComputeCapability(h)
+            cap = f"{major}.{minor}"
+        except Exception:
+            cap = ""
+        gpus.append(GPUInfo(
+            index=i, name=name, total_mb=int(mem.total) // 1024 // 1024,
+            compute_cap=cap,
+        ))
     islands = _build_islands(count)
     return Topology(gpus=gpus, _islands=islands)
 

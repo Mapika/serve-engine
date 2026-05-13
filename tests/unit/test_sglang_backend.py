@@ -113,3 +113,17 @@ def test_build_argv_does_not_emit_max_lora_rank_or_target_modules():
     argv = SGLangBackend().build_argv(_plan(max_loras=4), local_model_path="/m")
     assert "--max-lora-rank" not in argv
     assert "--lora-target-modules" not in argv
+
+
+def test_sglang_snapshot_flag_and_hooks():
+    """SGLang opts into snapshots via the same inductor-cache bind-mount
+    pattern as vLLM — no SGLang-specific flag exists, env var carries it."""
+    b = SGLangBackend()
+    assert b.supports_snapshots is True
+    assert b.snapshot_mount("/host/snapshots/k") == {
+        "/host/snapshots/k": {"bind": "/snapshots", "mode": "rw"},
+    }
+    assert b.snapshot_env("/host/snapshots/k") == {
+        "TORCHINDUCTOR_CACHE_DIR": "/snapshots/torch_cache",
+    }
+    assert b.snapshot_load_argv("/host/snapshots/k") == []
