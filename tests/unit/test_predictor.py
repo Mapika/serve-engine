@@ -368,3 +368,39 @@ def test_candidate_key_property_round_trips():
     assert c1.key == ("a", None)
     assert c2.key == ("a", "x")
     assert c1.key != c2.key
+
+
+# ---- PredictorConfig.load (predictor.yaml) ----
+
+def test_predictor_config_load_returns_defaults_when_file_absent(tmp_path):
+    cfg = PredictorConfig.load(tmp_path / "missing.yaml")
+    assert cfg.enabled is True
+    assert cfg.tick_interval_s == 30
+    assert cfg.max_prewarm_per_tick == 2
+    assert cfg.retention_days == 30
+    assert cfg.sequencing.window_s == 30
+    assert cfg.sequencing.min_p == 0.30
+    assert cfg.key_affinity.top_k_per_key == 5
+    assert cfg.key_affinity.idle_seconds == 300
+
+
+def test_predictor_config_load_partial_yaml_keeps_defaults_for_missing_keys(tmp_path):
+    p = tmp_path / "predictor.yaml"
+    p.write_text(
+        "enabled: false\n"
+        "rules:\n"
+        "  sequencing:\n"
+        "    min_p: 0.5\n"
+    )
+    cfg = PredictorConfig.load(p)
+    assert cfg.enabled is False
+    assert cfg.tick_interval_s == 30  # default
+    assert cfg.sequencing.min_p == 0.5  # overridden
+    assert cfg.sequencing.window_s == 30  # default
+    assert cfg.time_of_day.enabled is True  # default
+
+
+def test_predictor_config_load_malformed_yaml_falls_back_to_defaults(tmp_path):
+    p = tmp_path / "predictor.yaml"
+    p.write_text("not: valid: yaml:")
+    assert PredictorConfig.load(p) == PredictorConfig()

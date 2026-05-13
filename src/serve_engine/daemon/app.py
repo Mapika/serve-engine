@@ -88,13 +88,15 @@ def build_apps(
         cfg_path=_cfg.SERVE_DIR / "snapshots.yaml",
     )
     # Sub-project C: predictor pre-warms adapters every tick_interval_s
-    # using the rule-based scorer over usage_events. Disabled by default
-    # for installations that haven't accumulated enough history; flip
-    # via ~/.serve/predictor.yaml when ready.
+    # using the rule-based scorer over usage_events. Reads
+    # ~/.serve/predictor.yaml each ctor — operators tune via that file.
+    from serve_engine.lifecycle.predictor import PredictorConfig
+    predictor_cfg = PredictorConfig.load(_cfg.SERVE_DIR / "predictor.yaml")
     predictor_task = PredictorTask(
         conn=conn,
         backends=backends,
         models_dir=models_dir,
+        config=predictor_cfg,
     )
 
     @asynccontextmanager

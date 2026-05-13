@@ -16,10 +16,16 @@ Design: docs/superpowers/specs/2026-05-13-predictive-layer-design.md §4.
 """
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import yaml
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -62,6 +68,53 @@ class PredictorConfig:
     time_of_day: RuleConfig = field(default_factory=RuleConfig)
     sequencing: SequencingConfig = field(default_factory=SequencingConfig)
     key_affinity: KeyAffinityConfig = field(default_factory=KeyAffinityConfig)
+
+    @classmethod
+    def load(cls, path: Path) -> PredictorConfig:
+        """Read ~/.serve/predictor.yaml. Missing file / malformed YAML /
+        missing keys all silently fall back to defaults — operators can
+        ship a partial file and only override the fields they care about.
+        """
+        if not path.is_file():
+            return cls()
+        try:
+            data = yaml.safe_load(path.read_text()) or {}
+        except (OSError, yaml.YAMLError) as e:
+            log.warning("failed to read %s: %s; using defaults", path, e)
+            return cls()
+        rules = data.get("rules", {})
+        td = rules.get("time_of_day", {})
+        sq = rules.get("sequencing", {})
+        ka = rules.get("key_affinity", {})
+        defaults = cls()
+        return cls(
+            enabled=bool(data.get("enabled", defaults.enabled)),
+            tick_interval_s=int(data.get("tick_interval_s", defaults.tick_interval_s)),
+            max_prewarm_per_tick=int(data.get(
+                "max_prewarm_per_tick", defaults.max_prewarm_per_tick,
+            )),
+            retention_days=int(data.get("retention_days", defaults.retention_days)),
+            time_of_day=RuleConfig(
+                enabled=bool(td.get("enabled", defaults.time_of_day.enabled)),
+                weight=float(td.get("weight", defaults.time_of_day.weight)),
+            ),
+            sequencing=SequencingConfig(
+                enabled=bool(sq.get("enabled", defaults.sequencing.enabled)),
+                weight=float(sq.get("weight", defaults.sequencing.weight)),
+                window_s=int(sq.get("window_s", defaults.sequencing.window_s)),
+                min_p=float(sq.get("min_p", defaults.sequencing.min_p)),
+            ),
+            key_affinity=KeyAffinityConfig(
+                enabled=bool(ka.get("enabled", defaults.key_affinity.enabled)),
+                weight=float(ka.get("weight", defaults.key_affinity.weight)),
+                top_k_per_key=int(ka.get(
+                    "top_k_per_key", defaults.key_affinity.top_k_per_key,
+                )),
+                idle_seconds=int(ka.get(
+                    "idle_seconds", defaults.key_affinity.idle_seconds,
+                )),
+            ),
+        )
 
 
 class Predictor:
