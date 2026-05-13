@@ -124,6 +124,6 @@ def test_sglang_snapshot_flag_and_hooks():
         "/host/snapshots/k": {"bind": "/snapshots", "mode": "rw"},
     }
     assert b.snapshot_env("/host/snapshots/k") == {
-        "TORCHINDUCTOR_CACHE_DIR": "/snapshots/torch_cache",
+        "TORCHINDUCTOR_CACHE_DIR": "/snapshots/torch_inductor",
     }
     assert b.snapshot_load_argv("/host/snapshots/k") == []

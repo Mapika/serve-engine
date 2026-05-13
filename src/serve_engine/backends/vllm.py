@@ -6,12 +6,19 @@ from serve_engine.lifecycle.plan import DeploymentPlan
 
 class VLLMBackend(ContainerBackend):
     name = "vllm"
-    # Persists the torch.compile inductor cache across deployments via the
-    # bind-mount + TORCHINDUCTOR_CACHE_DIR pattern in the base class. vLLM
-    # v0.20.2 has no `--load-format cached`; the inductor compile cache is
-    # the real win for warm-restore (skips graph compilation, ~30-60s →
-    # ~5-15s on first-token).
+    # Persist the engine's torch.compile cache across deployments. vLLM
+    # 0.20.2 ignores TORCHINDUCTOR_CACHE_DIR for its own compile cache —
+    # it writes under VLLM_CACHE_ROOT/torch_compile_cache/. Pointing
+    # VLLM_CACHE_ROOT at our bind-mounted /snapshots directory means
+    # the next deployment with the same shape finds the compiled
+    # kernels already on disk and skips graph compilation (~30-60s
+    # → ~5-15s on first-token).
     supports_snapshots = True
+
+    def snapshot_env(self, snapshot_path: str) -> dict[str, str]:
+        if not self.supports_snapshots:
+            return {}
+        return {"VLLM_CACHE_ROOT": self.SNAPSHOT_MOUNT_PATH}
 
     def container_env(self, plan: DeploymentPlan) -> dict[str, str]:
         env = super().container_env(plan)

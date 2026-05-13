@@ -128,13 +128,14 @@ class ContainerBackend:
         return []
 
     def snapshot_env(self, snapshot_path: str) -> dict[str, str]:
-        """Env vars to set when a snapshot is in play. Default: point
-        TORCHINDUCTOR_CACHE_DIR at the bind-mounted /snapshots/torch_cache."""
-        if not self.supports_snapshots:
-            return {}
-        return {
-            "TORCHINDUCTOR_CACHE_DIR": f"{self.SNAPSHOT_MOUNT_PATH}/torch_cache",
-        }
+        """Env vars to set when a snapshot is in play. Default: empty.
+
+        The compile-cache env var is engine-specific — vLLM ignores
+        TORCHINDUCTOR_CACHE_DIR for its own compile cache and uses
+        VLLM_CACHE_ROOT, SGLang uses TORCHINDUCTOR_CACHE_DIR. Backends
+        override this to point at the bind-mount.
+        """
+        return {}
 
     def container_kwargs(self, plan: DeploymentPlan) -> dict[str, object]:
         return {

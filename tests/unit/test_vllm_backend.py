@@ -136,13 +136,14 @@ def test_snapshot_env_default_empty():
 
 
 def test_vllm_snapshot_flag_and_hooks():
-    """vLLM opts into snapshots; the base class delivers the bind-mount
-    + TORCHINDUCTOR_CACHE_DIR pair pointed at /snapshots/torch_cache."""
+    """vLLM 0.20.2 stores its torch.compile cache under VLLM_CACHE_ROOT
+    (NOT TORCHINDUCTOR_CACHE_DIR). Pointing VLLM_CACHE_ROOT at the
+    bind-mounted /snapshots dir is what persists the cache."""
     b = VLLMBackend()
     assert b.supports_snapshots is True
     mounts = b.snapshot_mount("/host/snapshots/abc")
     assert mounts == {"/host/snapshots/abc": {"bind": "/snapshots", "mode": "rw"}}
     env = b.snapshot_env("/host/snapshots/abc")
-    assert env == {"TORCHINDUCTOR_CACHE_DIR": "/snapshots/torch_cache"}
+    assert env == {"VLLM_CACHE_ROOT": "/snapshots"}
     # No extra argv needed — env var alone suffices for vLLM 0.20.x.
     assert b.snapshot_load_argv("/host/snapshots/abc") == []

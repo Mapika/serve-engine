@@ -107,9 +107,10 @@ def test_load_uses_snapshot_path_when_supported(
     assert len(snapshot_hosts) == 1
     assert volumes[snapshot_hosts[0]] == {"bind": "/snapshots", "mode": "rw"}
 
-    # TORCHINDUCTOR_CACHE_DIR set in container env.
+    # vLLM cache root set in container env (vLLM 0.20.2 stores its compile
+    # cache under VLLM_CACHE_ROOT, not TORCHINDUCTOR_CACHE_DIR).
     env = captured["environment"]
-    assert env.get("TORCHINDUCTOR_CACHE_DIR") == "/snapshots/torch_cache"
+    assert env.get("VLLM_CACHE_ROOT") == "/snapshots"
 
     # Snapshot row inserted with size sampled from disk.
     from serve_engine.store import snapshots as snap_store
