@@ -49,6 +49,7 @@ def build_apps(
     models_dir: Path,
     topology: Topology | None = None,
     configs_dir: Path | None = None,
+    snapshots_dir: Path | None = None,
 ) -> tuple[FastAPI, FastAPI]:
     """Returns (tcp_app, uds_app) sharing the same LifecycleManager.
 
@@ -66,6 +67,7 @@ def build_apps(
         topology=topology,
         event_bus=event_bus,
         configs_dir=configs_dir,
+        snapshots_dir=snapshots_dir,
     )
 
     from serve_engine.lifecycle.reaper import Reaper

@@ -57,6 +57,70 @@ def _patch_externals(monkeypatch, tmp_path, vram_mb=20_000):
     (tmp_path / "weights").mkdir(exist_ok=True)
 
 
+@pytest.fixture
+def topo_one_gpu_with_cap():
+    return Topology(
+        gpus=[GPUInfo(index=0, name="H100", total_mb=80 * 1024, compute_cap="9.0")],
+        _islands={0: frozenset({0})},
+    )
+
+
+def test_load_uses_snapshot_path_when_supported(
+    conn, monkeypatch, tmp_path, topo_one_gpu_with_cap,
+):
+    """When the backend opts into snapshots, manager.load (a) bind-mounts
+    ~/.serve/snapshots/<key>/ at /snapshots, (b) injects
+    TORCHINDUCTOR_CACHE_DIR=/snapshots/torch_cache, and (c) inserts a
+    snapshots row in the background after warmup. Save delay is 0 in
+    tests so we can drain pending saves explicitly."""
+    captured = {}
+
+    def _capture(**kw):
+        captured.update(kw)
+        return ContainerHandle(id="cid", name="x", address="127.0.0.1", port=49152)
+
+    docker_client = MagicMock()
+    docker_client.run.side_effect = _capture
+    _patch_externals(monkeypatch, tmp_path, vram_mb=20_000)
+
+    snapshots_dir = tmp_path / "snapshots"
+    mgr = LifecycleManager(
+        conn=conn, docker_client=docker_client,
+        backends={"vllm": VLLMBackend()}, models_dir=tmp_path,
+        topology=topo_one_gpu_with_cap,
+        snapshots_dir=snapshots_dir,
+        snapshot_save_delay_s=0.0,
+    )
+    model_store.add(conn, name="llama-1b", hf_repo="meta-llama/Llama-3.2-1B-Instruct")
+
+    async def _do():
+        dep = await mgr.load(_make_plan())
+        await mgr.await_pending_snapshot_saves()
+        return dep
+
+    dep = asyncio.run(_do())
+    assert dep.status == "ready"
+
+    # Snapshot bind-mount present in container volumes.
+    volumes = captured["volumes"]
+    snapshot_hosts = [p for p in volumes if "snapshots" in p]
+    assert len(snapshot_hosts) == 1
+    assert volumes[snapshot_hosts[0]] == {"bind": "/snapshots", "mode": "rw"}
+
+    # TORCHINDUCTOR_CACHE_DIR set in container env.
+    env = captured["environment"]
+    assert env.get("TORCHINDUCTOR_CACHE_DIR") == "/snapshots/torch_cache"
+
+    # Snapshot row inserted with size sampled from disk.
+    from serve_engine.store import snapshots as snap_store
+    rows = snap_store.list_all(conn)
+    assert len(rows) == 1
+    assert rows[0].engine == "vllm"
+    assert rows[0].gpu_arch == "9.0"
+    assert rows[0].hf_repo == "meta-llama/Llama-3.2-1B-Instruct"
+    assert rows[0].local_path.endswith(rows[0].key)
+
+
 def test_load_starts_engine_and_marks_ready(conn, monkeypatch, tmp_path, topo_one_gpu):
     docker_client = MagicMock()
     docker_client.run.return_value = ContainerHandle(

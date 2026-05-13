@@ -29,6 +29,7 @@ from serve_engine.lifecycle.topology import Topology
 from serve_engine.observability.events import Event, EventBus
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
+from serve_engine.store import snapshots as snapshot_store
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +66,8 @@ class LifecycleManager:
         load_timeout_s: float = 600.0,
         event_bus: EventBus | None = None,
         configs_dir: Path | None = None,
+        snapshots_dir: Path | None = None,
+        snapshot_save_delay_s: float = 10.0,
     ):
         self._conn = conn
         self._docker = docker_client
@@ -73,6 +76,13 @@ class LifecycleManager:
         # Per-deployment engine YAML configs, mounted into containers at
         # /serve/configs:ro. Backends opt-in via engine_config(plan).
         self._configs_dir = configs_dir or (models_dir.parent / "configs")
+        # Sub-project B: per-(snapshot_key) dir bind-mounted at /snapshots
+        # so engines write their inductor cache there. The host dir
+        # survives container teardown; the next deployment with the same
+        # key reuses the warm cache.
+        self._snapshots_dir = snapshots_dir or (models_dir.parent / "snapshots")
+        self._snapshot_save_delay_s = snapshot_save_delay_s
+        self._pending_snapshot_saves: set[asyncio.Task] = set()
         self._topology = topology
         self._load_timeout_s = load_timeout_s
         self._events = event_bus
@@ -250,15 +260,38 @@ class LifecycleManager:
                 volumes[str(self._configs_dir.resolve())] = {
                     "bind": "/serve/configs", "mode": "ro",
                 }
+
+            # 7. Snapshot lookup (Sub-project B). When the backend opts in,
+            # compute the key, pre-create the host dir, merge bind-mount +
+            # env + extra argv. On HIT touch the existing row; on MISS a
+            # background task inserts the row after warmup completes.
+            snapshot_ctx = self._prepare_snapshot(
+                plan=plan,
+                effective_plan=effective_plan,
+                backend=backend,
+                gpu_ids=gpu_ids,
+                target_concurrency=target_concurrency,
+            )
+            if snapshot_ctx is not None:
+                volumes.update(snapshot_ctx["volumes"])
+
+            argv = backend.build_argv(
+                effective_plan,
+                local_model_path=container_model_path,
+                config_path=container_config_path,
+            )
+            if snapshot_ctx is not None:
+                argv.extend(snapshot_ctx["extra_argv"])
+
+            container_env = backend.container_env(effective_plan)
+            if snapshot_ctx is not None:
+                container_env = {**container_env, **snapshot_ctx["env"]}
+
             handle = self._docker.run(
                 image=plan.image_tag,
                 name=f"serve-{plan.backend}-{plan.model_name}-{dep.id}",
-                command=backend.build_argv(
-                    effective_plan,
-                    local_model_path=container_model_path,
-                    config_path=container_config_path,
-                ),
-                environment=backend.container_env(effective_plan),
+                command=argv,
+                environment=container_env,
                 kwargs=backend.container_kwargs(effective_plan),
                 volumes=volumes,
                 internal_port=backend.internal_port,
@@ -291,6 +324,28 @@ class LifecycleManager:
 
             dep_store.update_status(self._conn, dep.id, "ready")
             await self._emit("deployment.ready", dep_id=dep.id)
+
+            # Snapshot bookkeeping. On HIT we just bump last_used_at; on
+            # MISS schedule a background task that samples the bind-mount
+            # size after the configured warmup delay and inserts the row.
+            if snapshot_ctx is not None:
+                if snapshot_ctx["existing_id"] is not None:
+                    snapshot_store.touch(self._conn, snapshot_ctx["existing_id"])
+                else:
+                    task = asyncio.create_task(
+                        self._snapshot_save_task(
+                            dep_id=dep.id,
+                            key=snapshot_ctx["key"],
+                            snapshot_path=snapshot_ctx["host_path"],
+                            plan=plan,
+                            target_concurrency=target_concurrency,
+                            gpu_arch=snapshot_ctx["gpu_arch"],
+                            tensor_parallel=len(gpu_ids),
+                        )
+                    )
+                    self._pending_snapshot_saves.add(task)
+                    task.add_done_callback(self._pending_snapshot_saves.discard)
+
             return dep_store.get_by_id(self._conn, dep.id)
 
     async def stop(self, dep_id: int) -> None:
@@ -366,3 +421,146 @@ class LifecycleManager:
                 pass
         dep_store.update_status(self._conn, dep.id, "stopped")
         await self._emit("deployment.stopped", dep_id=dep_id)
+
+    # ---- Snapshot helpers (Sub-project B) ----
+
+    def _prepare_snapshot(
+        self,
+        *,
+        plan: DeploymentPlan,
+        effective_plan: DeploymentPlan,
+        backend: Backend,
+        gpu_ids: list[int],
+        target_concurrency: int,
+    ) -> dict | None:
+        """Compute snapshot key + bind-mount details for this load.
+
+        Returns None when the backend opts out of snapshots, the topology
+        is missing, or the chosen GPU's compute_cap is unknown — any of
+        which makes the key meaningless. Otherwise returns the bag of
+        (volumes, env, extra_argv, key, host_path, existing_id) the
+        load path threads into docker.run + the post-warmup save task.
+        """
+        if not backend.supports_snapshots:
+            return None
+        if self._topology is None:
+            return None
+        gpu_arch = self._topology.gpus[gpu_ids[0]].compute_cap
+        key = snapshot_store.compute_snapshot_key(
+            hf_repo=plan.hf_repo,
+            revision=plan.revision,
+            engine=plan.backend,
+            engine_image=plan.image_tag,
+            gpu_arch=gpu_arch,
+            quantization=plan.extra_args.get("--quantization"),
+            max_model_len=plan.max_model_len,
+            dtype=plan.dtype,
+            tensor_parallel=len(gpu_ids),
+            target_concurrency=target_concurrency,
+        )
+        host_path = self._snapshots_dir / key
+        host_path.mkdir(parents=True, exist_ok=True)
+        existing = snapshot_store.get_by_key(self._conn, key)
+        return {
+            "key": key,
+            "host_path": host_path,
+            "gpu_arch": gpu_arch,
+            "existing_id": existing.id if existing else None,
+            "volumes": backend.snapshot_mount(str(host_path)),
+            "env": backend.snapshot_env(str(host_path)),
+            "extra_argv": backend.snapshot_load_argv(str(host_path)),
+        }
+
+    async def _snapshot_save_task(
+        self,
+        *,
+        dep_id: int,
+        key: str,
+        snapshot_path: Path,
+        plan: DeploymentPlan,
+        target_concurrency: int,
+        gpu_arch: str,
+        tensor_parallel: int,
+    ) -> None:
+        """Wait, sample size, insert row. Retry once at +30s on failure.
+
+        The deployment keeps serving regardless — snapshot is a cache, a
+        failed save means we'll cold-load next time instead of warm-load.
+        Operator gets a `snapshot.save_failed` event for visibility.
+        """
+        try:
+            await asyncio.sleep(self._snapshot_save_delay_s)
+            await self._snapshot_save_now(
+                key=key, snapshot_path=snapshot_path, plan=plan,
+                target_concurrency=target_concurrency, gpu_arch=gpu_arch,
+                tensor_parallel=tensor_parallel,
+            )
+        except Exception as e:
+            log.warning("snapshot save failed for dep #%d: %s; retrying in 30s", dep_id, e)
+            await self._emit("snapshot.save_failed", dep_id=dep_id, key=key, error=str(e))
+            try:
+                await asyncio.sleep(30.0)
+                await self._snapshot_save_now(
+                    key=key, snapshot_path=snapshot_path, plan=plan,
+                    target_concurrency=target_concurrency, gpu_arch=gpu_arch,
+                    tensor_parallel=tensor_parallel,
+                )
+            except Exception as e2:
+                log.error("snapshot save retry failed for dep #%d: %s", dep_id, e2)
+
+    async def _snapshot_save_now(
+        self,
+        *,
+        key: str,
+        snapshot_path: Path,
+        plan: DeploymentPlan,
+        target_concurrency: int,
+        gpu_arch: str,
+        tensor_parallel: int,
+    ) -> None:
+        size_mb = _du_mb(snapshot_path)
+        # Lost the race with another deployment of the same key: just touch.
+        existing = snapshot_store.get_by_key(self._conn, key)
+        if existing is not None:
+            snapshot_store.touch(self._conn, existing.id)
+            return
+        snapshot_store.add(
+            self._conn,
+            key=key,
+            hf_repo=plan.hf_repo,
+            revision=plan.revision,
+            engine=plan.backend,
+            engine_image=plan.image_tag,
+            gpu_arch=gpu_arch,
+            quantization=plan.extra_args.get("--quantization"),
+            max_model_len=plan.max_model_len,
+            dtype=plan.dtype,
+            tensor_parallel=tensor_parallel,
+            target_concurrency=target_concurrency,
+            local_path=str(snapshot_path),
+            size_mb=size_mb,
+        )
+        await self._emit("snapshot.saved", key=key, size_mb=size_mb)
+
+    async def await_pending_snapshot_saves(self) -> None:
+        """Drain in-flight save tasks. Tests await this after load(); the
+        production daemon ignores them — they're fire-and-forget."""
+        if self._pending_snapshot_saves:
+            await asyncio.gather(
+                *self._pending_snapshot_saves, return_exceptions=True,
+            )
+
+
+def _du_mb(path: Path) -> int:
+    """Recursive disk size in MiB (ceil). Returns 0 if the path is missing
+    or unreadable — caller treats that as "nothing to save yet"."""
+    if not path.exists():
+        return 0
+    total = 0
+    for p in path.rglob("*"):
+        try:
+            if p.is_file():
+                total += p.stat().st_size
+        except OSError:
+            continue
+    return (total + 1024 * 1024 - 1) // (1024 * 1024)
