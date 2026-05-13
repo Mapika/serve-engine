@@ -9,16 +9,19 @@ app = typer.Typer(
 )
 
 from serve_engine.cli import (  # noqa: E402
+    adapter_cmd,  # noqa: F401  registers `adapter` sub-app (Sub-project A v2)
     daemon_cmd,  # noqa: F401  registers `daemon` sub-app
     doctor_cmd,  # noqa: F401  registers command
     key_cmd,  # noqa: F401  registers `key` sub-app
     logs_cmd,  # noqa: F401  registers command
     ls_cmd,  # noqa: F401  registers command
     pin_cmd,  # noqa: F401  registers `pin` and `unpin` commands
+    predict_cmd,  # noqa: F401  registers `predict` command (Sub-project C)
     ps_cmd,  # noqa: F401  registers command
     pull_cmd,  # noqa: F401  registers command
     run_cmd,  # noqa: F401  registers command
     setup_cmd,  # noqa: F401  registers command
+    snapshot_cmd,  # noqa: F401  registers `snapshot` sub-app (Sub-project B)
     stop_cmd,  # noqa: F401  registers command
     top_cmd,  # noqa: F401  registers command
     update_engines_cmd,  # noqa: F401  registers command

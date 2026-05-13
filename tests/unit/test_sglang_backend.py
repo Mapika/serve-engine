@@ -90,3 +90,40 @@ def test_manifest_extra_launch_args_appear_in_argv():
     """The version-pinned workaround flags from backends.yaml are forwarded."""
     argv = SGLangBackend().build_argv(_plan(), local_model_path="/models/x")
     assert "--disable-piecewise-cuda-graph" in argv
+
+
+def test_build_argv_no_lora_flags_when_max_loras_zero():
+    """Default behavior unchanged: no LoRA flags emitted when max_loras=0."""
+    argv = SGLangBackend().build_argv(_plan(), local_model_path="/m")
+    assert "--enable-lora" not in argv
+    assert "--max-loras-per-batch" not in argv
+
+
+def test_build_argv_emits_lora_flags_when_max_loras_set():
+    """SGLang uses --max-loras-per-batch (NOT --max-loras like vLLM)."""
+    argv = SGLangBackend().build_argv(_plan(max_loras=4), local_model_path="/m")
+    assert "--enable-lora" in argv
+    j = argv.index("--max-loras-per-batch")
+    assert argv[j + 1] == "4"
+
+
+def test_build_argv_does_not_emit_max_lora_rank_or_target_modules():
+    """We do NOT pick max_lora_rank / lora_target_modules ourselves —
+    they're checkpoint-specific. Operators set via --extra if needed."""
+    argv = SGLangBackend().build_argv(_plan(max_loras=4), local_model_path="/m")
+    assert "--max-lora-rank" not in argv
+    assert "--lora-target-modules" not in argv
+
+
+def test_sglang_snapshot_flag_and_hooks():
+    """SGLang opts into snapshots via the same inductor-cache bind-mount
+    pattern as vLLM — no SGLang-specific flag exists, env var carries it."""
+    b = SGLangBackend()
+    assert b.supports_snapshots is True
+    assert b.snapshot_mount("/host/snapshots/k") == {
+        "/host/snapshots/k": {"bind": "/snapshots", "mode": "rw"},
+    }
+    assert b.snapshot_env("/host/snapshots/k") == {
+        "TORCHINDUCTOR_CACHE_DIR": "/snapshots/torch_inductor",
+    }
+    assert b.snapshot_load_argv("/host/snapshots/k") == []

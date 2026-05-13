@@ -117,6 +117,129 @@ async def test_create_deployment_passes_extra_args_to_argv(app):
 
 
 @pytest.mark.asyncio
+async def test_predictor_candidates_endpoint(app):
+    """/admin/predictor/candidates returns a list of {model, score, reason}.
+    With a fresh empty DB the list is empty — the endpoint should not 500."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/admin/predictor/candidates")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+@pytest.mark.asyncio
+async def test_predictor_stats_endpoint(app):
+    """/admin/predictor/stats returns the tick-loop counters even before
+    the first tick has run."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/admin/predictor/stats")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["preloads_attempted"] == 0
+    assert body["preloads_succeeded"] == 0
+    assert "enabled" in body
+
+
+@pytest.mark.asyncio
+async def test_snapshot_endpoints_list_delete_gc(app, tmp_path):
+    """End-to-end /admin/snapshots: list returns rows, DELETE by key wipes
+    the row + on-disk dir, gc honors keep_last_per_model and removes the
+    blobs of evicted snapshots."""
+    from serve_engine.store import snapshots as snap_store
+
+    conn = app.state.conn
+
+    # Seed three snapshots for the same engine/model so GC keep_last=1
+    # removes the two older ones.
+    snap_root = tmp_path / "snapshots"
+    snap_root.mkdir()
+    ids: list[int] = []
+    for i in range(3):
+        d = snap_root / f"key{i}"
+        d.mkdir()
+        (d / "torch_cache").mkdir()
+        (d / "torch_cache" / "blob.bin").write_bytes(b"x" * 1024)
+        row = snap_store.add(
+            conn, key=f"key{i}",
+            hf_repo="org/model", revision="main",
+            engine="vllm", engine_image="vllm/vllm-openai:v0.20.2",
+            gpu_arch="9.0", quantization=None,
+            max_model_len=4096, dtype="auto",
+            tensor_parallel=1, target_concurrency=8,
+            local_path=str(d), size_mb=1,
+        )
+        ids.append(row.id)
+        # Spread last_used_at so list ordering is deterministic.
+        conn.execute(
+            "UPDATE snapshots SET last_used_at = datetime('now', ?) WHERE id=?",
+            (f"-{i * 10} minutes", row.id),
+        )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=10) as c:
+        r = await c.get("/admin/snapshots")
+        assert r.status_code == 200
+        listed = r.json()
+        assert len(listed) == 3
+        # First entry should be the newest (key0 — last_used_at most recent).
+        assert listed[0]["key"] == "key0"
+        assert listed[0]["key_prefix"] == "key0"
+
+        # Delete key2 explicitly; its directory must be gone afterward.
+        d2 = snap_root / "key2"
+        r = await c.delete("/admin/snapshots/key2")
+        assert r.status_code == 204, r.text
+        assert not d2.exists()
+        assert snap_store.get_by_key(conn, "key2") is None
+
+        # GC with keep_last=1 should drop key1 (we already deleted key2).
+        r = await c.post(
+            "/admin/snapshots/gc",
+            json={"keep_last_per_model": 1},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["removed"] == 1
+        assert snap_store.get_by_key(conn, "key1") is None
+        assert snap_store.get_by_key(conn, "key0") is not None
+        # Disk dir for key1 should be gone too.
+        assert not (snap_root / "key1").exists()
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_409_when_replacing_pinned(app):
+    """If a same-name deployment is already pinned, the daemon must return
+    a 4xx with the manager's "is pinned" message — not a 500 — so the CLI
+    can show the actionable hint ("run `serve unpin <model>`")."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        r1 = await c.post(
+            "/admin/deployments",
+            json={
+                "model_name": "llama-1b",
+                "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
+                "image_tag": "vllm/vllm-openai:v0.7.3",
+                "gpu_ids": [0], "max_model_len": 8192, "pinned": True,
+            },
+        )
+        assert r1.status_code == 201, r1.text
+        r2 = await c.post(
+            "/admin/deployments",
+            json={
+                "model_name": "llama-1b",
+                "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
+                "image_tag": "vllm/vllm-openai:v0.7.3",
+                "gpu_ids": [0], "max_model_len": 8192,
+            },
+        )
+    assert r2.status_code == 409, r2.text
+    body = r2.json()
+    assert "is pinned" in body["detail"]
+    assert "serve unpin" in body["detail"]
+
+
+@pytest.mark.asyncio
 async def test_list_models(app):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:

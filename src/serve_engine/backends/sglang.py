@@ -6,6 +6,20 @@ from serve_engine.lifecycle.plan import DeploymentPlan
 
 class SGLangBackend(ContainerBackend):
     name = "sglang"
+    # SGLang's runtime adapter endpoints sit at root, NOT under /v1/.
+    adapter_load_path = "/load_lora_adapter"
+    adapter_unload_path = "/unload_lora_adapter"
+    # SGLang v0.5.11 has no cache-dir flag of its own but honors
+    # TORCHINDUCTOR_CACHE_DIR via the upstream torch.compile stack —
+    # persists the inductor compile cache across deployments.
+    supports_snapshots = True
+
+    def snapshot_env(self, snapshot_path: str) -> dict[str, str]:
+        if not self.supports_snapshots:
+            return {}
+        return {
+            "TORCHINDUCTOR_CACHE_DIR": f"{self.SNAPSHOT_MOUNT_PATH}/torch_inductor",
+        }
 
     def build_argv(
         self,
@@ -29,6 +43,18 @@ class SGLangBackend(ContainerBackend):
             "--port", str(self.manifest.internal_port),
             "--served-model-name", plan.model_name,
         ]
+        if plan.max_loras > 0:
+            # SGLang's slot flag is --max-loras-per-batch (different name
+            # from vLLM's --max-loras). For fully dynamic loading without
+            # any startup --lora-paths, the SGLang docs recommend setting
+            # --max-lora-rank and --lora-target-modules explicitly; we
+            # don't pick those here because they're checkpoint-specific.
+            # Operators that need them pass --extra "--max-lora-rank=64"
+            # and --extra "--lora-target-modules=all".
+            argv.extend([
+                "--enable-lora",
+                "--max-loras-per-batch", str(plan.max_loras),
+            ])
         argv.extend(self.manifest.extra_launch_args)
         self._append_extra(argv, plan.extra_args)
         return argv

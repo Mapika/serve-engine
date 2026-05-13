@@ -34,13 +34,28 @@ def add(
     hf_repo: str,
     revision: str = "main",
 ) -> Model:
-    try:
-        cur = conn.execute(
-            "INSERT INTO models (name, hf_repo, revision) VALUES (?, ?, ?)",
-            (name, hf_repo, revision),
-        )
-    except sqlite3.IntegrityError as e:
-        raise AlreadyExists(f"model {name!r} already exists") from e
+    """Register a base model. Refuses if `name` collides with a registered
+    adapter — adapters and bases share the routing namespace, so a duplicate
+    would make `model='x'` ambiguous in OpenAI requests."""
+    with conn.locked():
+        # adapters table only exists at migration 004+; absence is fine.
+        try:
+            collision = conn.execute(
+                "SELECT 1 FROM adapters WHERE name=?", (name,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            collision = None
+        if collision:
+            raise AlreadyExists(
+                f"name {name!r} is already used by an adapter"
+            )
+        try:
+            cur = conn.execute(
+                "INSERT INTO models (name, hf_repo, revision) VALUES (?, ?, ?)",
+                (name, hf_repo, revision),
+            )
+        except sqlite3.IntegrityError as e:
+            raise AlreadyExists(f"model {name!r} already exists") from e
     return Model(id=cur.lastrowid, name=name, hf_repo=hf_repo, revision=revision, local_path=None)
 
 

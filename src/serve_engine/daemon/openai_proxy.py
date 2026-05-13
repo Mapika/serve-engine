@@ -9,10 +9,19 @@ from fastapi.responses import StreamingResponse
 
 from serve_engine.auth.middleware import require_auth_dep
 from serve_engine.backends.base import Backend
+from serve_engine.lifecycle.adapter_router import (
+    UnknownModel,
+    ensure_adapter_loaded,
+    find_deployment_for,
+    resolve_target,
+)
+from serve_engine.store import adapters as ad_store
 from serve_engine.store import api_keys as _api_keys_store
+from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import key_usage as _key_usage_store
 from serve_engine.store import models as model_store
+from serve_engine.store import usage_events as _usage_events_store
 
 router = APIRouter()
 
@@ -45,19 +54,76 @@ async def _proxy(
     if not model_name:
         raise HTTPException(400, detail="request body must include 'model'")
 
-    active = dep_store.find_ready_by_model_name(conn, model_name)
+    # Resolve `model` to (base, optional adapter). Bare base names route
+    # exactly as v1 did. Adapter names cause us to (a) pick a deployment
+    # of the adapter's base that has the adapter loaded or can hot-load
+    # it, and (b) rewrite the upstream payload's `model` to the adapter
+    # name so vLLM/SGLang dispatch against the right LoRA slot.
+    try:
+        target = resolve_target(conn, model_name)
+    except UnknownModel as e:
+        raise HTTPException(404, detail=str(e)) from e
+
+    active = find_deployment_for(conn, target.base_model_name, target.adapter_name)
     if active is None or active.container_address is None:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"no ready deployment for model {model_name!r}",
-        )
+        # Differentiate: no deployment at all vs adapter requested but no
+        # LoRA-enabled deployment available.
+        if target.adapter_name:
+            detail = (
+                f"no ready deployment of base {target.base_model_name!r} "
+                f"with --max-loras > 0 for adapter {target.adapter_name!r}"
+            )
+        else:
+            detail = f"no ready deployment for model {model_name!r}"
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
 
     backend = backends.get(active.backend)
     if backend is None:
         raise HTTPException(500, detail=f"unknown backend {active.backend!r}")
 
+    # If adapter requested, ensure it's loaded into the chosen deployment.
+    # This is the hot-load path: ~100-500ms for the first request to a
+    # given adapter; sub-second on subsequent requests (already loaded).
+    cold_loaded = False
+    if target.adapter_name:
+        manager = request.app.state.manager
+        try:
+            cold_loaded = await ensure_adapter_loaded(
+                conn, backend, active, target.adapter_name,
+                models_dir=manager._models_dir,
+            )
+        except UnknownModel as e:
+            raise HTTPException(404, detail=str(e)) from e
+        except RuntimeError as e:
+            raise HTTPException(502, detail=f"adapter load failed: {e}") from e
+
     dep_store.touch_last_request(conn, active.id)
     request.app.state.request_count += 1
+    # Sub-project C: log this request for the predictor. Tokens are 0 at
+    # this point — patched in below via set_tokens once the upstream
+    # stream completes and the usage tracker extracts them.
+    usage_event_id = _usage_events_store.record(
+        conn,
+        model_name=model_name,
+        base_name=target.base_model_name,
+        adapter_name=target.adapter_name,
+        deployment_id=active.id,
+        api_key_id=key.id if key is not None else None,
+        cold_loaded=cold_loaded,
+    )
+
+    # Rewrite the upstream payload's `model` field to the adapter name
+    # when an adapter is in play — vLLM/SGLang both treat the OpenAI
+    # `model` field as the LoRA slot name when --enable-lora is on.
+    if target.adapter_name and target.adapter_name != model_name:
+        try:
+            parsed["model"] = target.adapter_name
+            body = json.dumps(parsed).encode()
+        except (TypeError, json.JSONDecodeError):
+            pass  # body already validated as JSON above; should not happen
+    elif target.adapter_name:
+        # bare adapter name was passed; no rewrite needed
+        pass
 
     base = f"http://{active.container_address}:{active.container_port}{backend.openai_base}"
     _HOP_BY_HOP = {"host", "content-length", "transfer-encoding", "connection"}
@@ -94,8 +160,17 @@ async def _proxy(
         finally:
             await stream_cm.__aexit__(None, None, None)
             await client.aclose()
+            tin, tout = usage_tracker.extract()
+            # Patch the usage_events row Sub-project C inserted at dispatch
+            # so the predictor (and any future quota/billing) sees real
+            # token counts. Skipped only when extraction yielded 0/0 from
+            # a missing/incomplete usage block, where overwriting buys
+            # nothing.
+            if tin or tout:
+                _usage_events_store.set_tokens(
+                    conn, usage_event_id, tokens_in=tin, tokens_out=tout,
+                )
             if key is not None:
-                tin, tout = usage_tracker.extract()
                 _key_usage_store.record(
                     conn, key_id=key.id, tokens_in=tin, tokens_out=tout,
                     model_name=model_name,
@@ -132,13 +207,17 @@ class _UsageTracker:
             self._current.extend(chunk)
             # An event ends with a blank line (\n\n). When we see one,
             # the bytes before the blank line are the most recent event.
+            # Keep only events that carry a usage payload — providers
+            # like OpenAI/vLLM/SGLang emit the usage chunk BEFORE the
+            # terminal `data: [DONE]` frame, so blindly tracking the
+            # last event loses the tokens.
             while True:
                 idx = self._current.find(b"\n\n")
                 if idx < 0:
                     break
                 event = bytes(self._current[:idx])
                 del self._current[: idx + 2]
-                if b"data:" in event:
+                if b"data:" in event and b'"usage"' in event:
                     self._last_event = bytearray(event)
         else:
             if not self._json_overflow:
@@ -213,16 +292,27 @@ def models(
     for d in dep_store.list_ready(conn):
         ready_by_model[d.model_id] = d
     rows = model_store.list_all(conn)
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": m.name,
-                "object": "model",
-                "owned_by": "serve-engine",
-                "loaded": m.id in ready_by_model,
-                "pinned": ready_by_model[m.id].pinned if m.id in ready_by_model else False,
-            }
-            for m in rows
-        ],
-    }
+    base_entries = [
+        {
+            "id": m.name,
+            "object": "model",
+            "owned_by": "serve-engine",
+            "loaded": m.id in ready_by_model,
+            "pinned": ready_by_model[m.id].pinned if m.id in ready_by_model else False,
+        }
+        for m in rows
+    ]
+    # Adapters appear alongside base models — clients can `model=<adapter>`
+    # directly. `base` field disambiguates for clients that want the parent.
+    adapter_entries = [
+        {
+            "id": a.name,
+            "object": "model",
+            "owned_by": "serve-engine",
+            "base": a.base_model.name,
+            "loaded": bool(da_store.find_deployments_with_adapter(conn, a.id)),
+            "downloaded": a.local_path is not None,
+        }
+        for a in ad_store.list_all(conn)
+    ]
+    return {"object": "list", "data": base_entries + adapter_entries}

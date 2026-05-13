@@ -49,6 +49,7 @@ def build_apps(
     models_dir: Path,
     topology: Topology | None = None,
     configs_dir: Path | None = None,
+    snapshots_dir: Path | None = None,
 ) -> tuple[FastAPI, FastAPI]:
     """Returns (tcp_app, uds_app) sharing the same LifecycleManager.
 
@@ -66,14 +67,42 @@ def build_apps(
         topology=topology,
         event_bus=event_bus,
         configs_dir=configs_dir,
+        snapshots_dir=snapshots_dir,
     )
 
+    from serve_engine.lifecycle.predictor_task import PredictorTask
     from serve_engine.lifecycle.reaper import Reaper
+    from serve_engine.lifecycle.snapshot_gc import SnapshotGc
     from serve_engine.store import deployments as _dep_store
     reaper = Reaper(
         manager=manager,
         list_ready=lambda: _dep_store.list_ready(conn),
     )
+    # Snapshot eviction loop. Reads ~/.serve/snapshots.yaml each tick so
+    # operators can adjust keep_last_per_model / max_disk_gb without a
+    # daemon restart. Defaults to keep_last_per_model=2 + no disk cap;
+    # ticks every 6 hours.
+    from serve_engine import config as _cfg
+    snapshot_gc = SnapshotGc(
+        conn=conn,
+        cfg_path=_cfg.SERVE_DIR / "snapshots.yaml",
+    )
+    # Sub-project C: predictor pre-warms adapters every tick_interval_s
+    # using the rule-based scorer over usage_events. Reads
+    # ~/.serve/predictor.yaml each ctor — operators tune via that file.
+    from serve_engine.lifecycle.predictor import PredictorConfig
+    from serve_engine.lifecycle.usage_rollup_task import UsageRollupTask
+    predictor_cfg = PredictorConfig.load(_cfg.SERVE_DIR / "predictor.yaml")
+    predictor_task = PredictorTask(
+        conn=conn,
+        backends=backends,
+        models_dir=models_dir,
+        config=predictor_cfg,
+    )
+    # Daily rollup: events older than predictor_cfg.retention_days get
+    # aggregated into usage_aggregates and removed from usage_events.
+    # Keeps the predictor's hot table bounded for long-running boxes.
+    rollup_task = UsageRollupTask(conn=conn, config=predictor_cfg)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -82,9 +111,26 @@ def build_apps(
             await manager.reconcile()
         except Exception:
             log.exception("reconcile failed; continuing")
+        # Run one GC pass at startup so a restarted daemon catches up on
+        # any snapshots that landed but exceeded policy since last tick.
+        try:
+            result = await snapshot_gc.tick_once()
+            if result["removed"] > 0:
+                log.info(
+                    "startup snapshot gc: removed %d, %d MB remaining",
+                    result["removed"], result["remaining_mb"],
+                )
+        except Exception:
+            log.exception("startup snapshot gc failed; continuing")
         reaper.start()
+        snapshot_gc.start()
+        predictor_task.start()
+        rollup_task.start()
         yield
         # Shutdown
+        await rollup_task.stop()
+        await predictor_task.stop()
+        await snapshot_gc.stop()
         await reaper.stop()
         try:
             await manager.stop_all()
@@ -93,6 +139,7 @@ def build_apps(
 
     tcp_app = FastAPI(title="serve-engine (public)", version="0.0.1", lifespan=lifespan)
     _attach_state(tcp_app, conn=conn, backends=backends, manager=manager, event_bus=event_bus)
+    tcp_app.state.predictor_task = predictor_task
     tcp_app.include_router(openai_router)
     tcp_app.include_router(metrics_router)
     tcp_app.include_router(admin_router)
@@ -100,6 +147,7 @@ def build_apps(
 
     uds_app = FastAPI(title="serve-engine (control)", version="0.0.1")
     _attach_state(uds_app, conn=conn, backends=backends, manager=manager, event_bus=event_bus)
+    uds_app.state.predictor_task = predictor_task
     uds_app.include_router(openai_router)
     uds_app.include_router(admin_router)
     uds_app.include_router(metrics_router)

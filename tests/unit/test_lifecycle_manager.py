@@ -57,6 +57,71 @@ def _patch_externals(monkeypatch, tmp_path, vram_mb=20_000):
     (tmp_path / "weights").mkdir(exist_ok=True)
 
 
+@pytest.fixture
+def topo_one_gpu_with_cap():
+    return Topology(
+        gpus=[GPUInfo(index=0, name="H100", total_mb=80 * 1024, compute_cap="9.0")],
+        _islands={0: frozenset({0})},
+    )
+
+
+def test_load_uses_snapshot_path_when_supported(
+    conn, monkeypatch, tmp_path, topo_one_gpu_with_cap,
+):
+    """When the backend opts into snapshots, manager.load (a) bind-mounts
+    ~/.serve/snapshots/<key>/ at /snapshots, (b) injects
+    TORCHINDUCTOR_CACHE_DIR=/snapshots/torch_cache, and (c) inserts a
+    snapshots row in the background after warmup. Save delay is 0 in
+    tests so we can drain pending saves explicitly."""
+    captured = {}
+
+    def _capture(**kw):
+        captured.update(kw)
+        return ContainerHandle(id="cid", name="x", address="127.0.0.1", port=49152)
+
+    docker_client = MagicMock()
+    docker_client.run.side_effect = _capture
+    _patch_externals(monkeypatch, tmp_path, vram_mb=20_000)
+
+    snapshots_dir = tmp_path / "snapshots"
+    mgr = LifecycleManager(
+        conn=conn, docker_client=docker_client,
+        backends={"vllm": VLLMBackend()}, models_dir=tmp_path,
+        topology=topo_one_gpu_with_cap,
+        snapshots_dir=snapshots_dir,
+        snapshot_save_delay_s=0.0,
+    )
+    model_store.add(conn, name="llama-1b", hf_repo="meta-llama/Llama-3.2-1B-Instruct")
+
+    async def _do():
+        dep = await mgr.load(_make_plan())
+        await mgr.await_pending_snapshot_saves()
+        return dep
+
+    dep = asyncio.run(_do())
+    assert dep.status == "ready"
+
+    # Snapshot bind-mount present in container volumes.
+    volumes = captured["volumes"]
+    snapshot_hosts = [p for p in volumes if "snapshots" in p]
+    assert len(snapshot_hosts) == 1
+    assert volumes[snapshot_hosts[0]] == {"bind": "/snapshots", "mode": "rw"}
+
+    # vLLM cache root set in container env (vLLM 0.20.2 stores its compile
+    # cache under VLLM_CACHE_ROOT, not TORCHINDUCTOR_CACHE_DIR).
+    env = captured["environment"]
+    assert env.get("VLLM_CACHE_ROOT") == "/snapshots"
+
+    # Snapshot row inserted with size sampled from disk.
+    from serve_engine.store import snapshots as snap_store
+    rows = snap_store.list_all(conn)
+    assert len(rows) == 1
+    assert rows[0].engine == "vllm"
+    assert rows[0].gpu_arch == "9.0"
+    assert rows[0].hf_repo == "meta-llama/Llama-3.2-1B-Instruct"
+    assert rows[0].local_path.endswith(rows[0].key)
+
+
 def test_load_starts_engine_and_marks_ready(conn, monkeypatch, tmp_path, topo_one_gpu):
     docker_client = MagicMock()
     docker_client.run.return_value = ContainerHandle(
@@ -98,7 +163,45 @@ def test_load_evicts_previous_when_room_constrained(conn, monkeypatch, tmp_path,
     docker_client.stop.assert_called_once_with("cid1", timeout=30)
 
 
+def test_load_stops_prior_deployment_of_same_name(conn, monkeypatch, tmp_path, topo_one_gpu):
+    """`serve run X` must stop any existing ready deployment named X before
+    starting the new one — that's the CLI contract ("Stops the current
+    model first"). Without this, two co-located deployments of the same
+    base name burn extra VRAM and the proxy's find_ready_by_model_name
+    routes to whichever has the newer started_at, masking config drift
+    between the two engine processes.
+    """
+    docker_client = MagicMock()
+    docker_client.run.side_effect = [
+        ContainerHandle(id="cid1", name="x1", address="127.0.0.1", port=49152),
+        ContainerHandle(id="cid2", name="x2", address="127.0.0.1", port=49153),
+    ]
+    # Small VRAM per deployment so both would fit on the 80 GB GPU under the
+    # current placement logic — placement will NOT evict on its own here.
+    _patch_externals(monkeypatch, tmp_path, vram_mb=10_000)
+
+    mgr = LifecycleManager(
+        conn=conn, docker_client=docker_client,
+        backends={"vllm": VLLMBackend()}, models_dir=tmp_path,
+        topology=topo_one_gpu,
+    )
+    model_store.add(conn, name="llama-1b", hf_repo="meta-llama/Llama-3.2-1B-Instruct")
+    dep1 = asyncio.run(mgr.load(_make_plan()))
+    dep2 = asyncio.run(mgr.load(_make_plan()))
+
+    # Invariant: at most one ready deployment per model_name. dep1 was
+    # superseded by dep2 and must be in 'stopped' status with its container
+    # torn down.
+    assert dep_store.get_by_id(conn, dep1.id).status == "stopped"
+    assert dep_store.get_by_id(conn, dep2.id).status == "ready"
+    docker_client.stop.assert_any_call("cid1", timeout=30)
+
+
 def test_pin_prevents_eviction(conn, monkeypatch, tmp_path, topo_one_gpu):
+    """Pinned deployments are not LRU-evicted to make room for a different
+    model. The second load is for a *different* model so the same-name
+    replacement path doesn't apply — this test is purely about placement.
+    """
     docker_client = MagicMock()
     docker_client.run.return_value = ContainerHandle(
         id="cid1", name="x1", address="127.0.0.1", port=49152,
@@ -113,10 +216,37 @@ def test_pin_prevents_eviction(conn, monkeypatch, tmp_path, topo_one_gpu):
     plan_pinned = replace(_make_plan(), pinned=True)
     model_store.add(conn, name="llama-1b", hf_repo="meta-llama/Llama-3.2-1B-Instruct")
     asyncio.run(mgr.load(plan_pinned))
-    # Loading another deployment that needs the same room must fail
-    plan2 = _make_plan()
+    # Different model that won't fit alongside the pinned one and can't
+    # evict it.
+    model_store.add(conn, name="other-model", hf_repo="org/other")
+    plan2 = replace(_make_plan(), model_name="other-model", hf_repo="org/other")
     with pytest.raises(RuntimeError, match="cannot place"):
         asyncio.run(mgr.load(plan2))
+
+
+def test_load_refuses_to_replace_pinned_same_name(conn, monkeypatch, tmp_path, topo_one_gpu):
+    """`serve run X` on a pinned X errors with a clear message instead of
+    silently replacing — pin is the operator's commitment that the
+    deployment is special. They must `serve unpin X` first.
+    """
+    docker_client = MagicMock()
+    docker_client.run.return_value = ContainerHandle(
+        id="cid1", name="x1", address="127.0.0.1", port=49152,
+    )
+    _patch_externals(monkeypatch, tmp_path, vram_mb=10_000)
+
+    mgr = LifecycleManager(
+        conn=conn, docker_client=docker_client,
+        backends={"vllm": VLLMBackend()}, models_dir=tmp_path,
+        topology=topo_one_gpu,
+    )
+    model_store.add(conn, name="llama-1b", hf_repo="meta-llama/Llama-3.2-1B-Instruct")
+    asyncio.run(mgr.load(replace(_make_plan(), pinned=True)))
+
+    with pytest.raises(RuntimeError, match="is pinned; run `serve unpin"):
+        asyncio.run(mgr.load(_make_plan()))
+    # Critical: the pinned deployment is still ready and intact.
+    docker_client.stop.assert_not_called()
 
 
 def test_load_marks_failed_on_unhealthy(conn, monkeypatch, tmp_path, topo_one_gpu):

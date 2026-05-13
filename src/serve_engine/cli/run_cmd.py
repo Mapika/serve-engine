@@ -44,8 +44,15 @@ def run(
         help="Raw engine flag, e.g. -x '--reasoning-parser=qwen3' "
              "or -x '--enable-expert-parallel'. Repeatable.",
     ),
+    max_loras: int = typer.Option(
+        0, "--max-loras",
+        help="Number of LoRA adapter slots to reserve in this deployment "
+             "(enables --enable-lora on vLLM, equivalent on SGLang). 0 = "
+             "adapters disabled. Adapters loaded later via `serve adapter load`.",
+    ),
 ):
-    """Load a model and make it active. Stops the current model first."""
+    """Load a model and make it active. Replaces any existing deployment
+    of the same name (errors if that deployment is pinned)."""
     gpu_ids = [int(g) for g in gpu.split(",") if g.strip()]
     extra_args: dict[str, str] = {}
     for raw in extra:
@@ -96,6 +103,8 @@ def run(
         body["backend"] = engine
     if max_seqs is not None:
         body["target_concurrency"] = max_seqs
+    if max_loras > 0:
+        body["max_loras"] = max_loras
     if extra_args:
         body["extra_args"] = extra_args
 

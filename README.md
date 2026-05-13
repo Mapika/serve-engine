@@ -126,6 +126,34 @@ serve update-engines      # check Docker Hub for newer pinned tags
 - **Backend abstraction**: each engine is a `Backend` Protocol implementation; argv differences (`--model` vs `--model-path`, `--gpu-memory-utilization` vs `--mem-fraction-static`) live entirely inside the engine class.
 - **Manifest-driven**: image tags, internal ports, and engine-specific headroom constants come from `src/serve_engine/backends/backends.yaml`. Override per-host in `~/.serve/backends.override.yaml`.
 
+## On-disk layout
+
+Everything the daemon owns lives under `~/.serve/` (override the parent via the `SERVE_HOME` env var):
+
+```
+~/.serve/
+├── db.sqlite               state — models, deployments, adapters, usage,
+│                           snapshots, api_keys, key_usage_events
+├── sock                    Unix-domain control socket (CLI ↔ daemon)
+├── logs/
+│   └── daemon.log          daemon stdout/stderr
+├── models/                 HuggingFace weight cache (one subdir per repo)
+│   └── models--<owner>--<repo>/snapshots/<rev>/…
+├── configs/                per-deployment engine YAMLs (TRT-LLM --config)
+│   └── <deployment_id>.yml
+├── snapshots/              torch.compile inductor caches, one dir per
+│   │                       content-addressable snapshot_key
+│   └── <sha256>/
+│       └── torch_compile_cache/  (vLLM) or torch_inductor/ (SGLang)
+├── snapshots.yaml          optional — snapshot GC tuning (keep_last_per_model,
+│                           max_disk_gb, tick_s). Defaults applied if absent.
+├── predictor.yaml          optional — predictor tuning (enabled, tick_interval_s,
+│                           per-rule thresholds). Defaults applied if absent.
+└── backends.override.yaml  optional — pin different engine image tags / headroom
+```
+
+Adapter blobs live alongside model weights under `models/`. Snapshot blobs are bind-mounted into the engine containers read-write so torch.compile artifacts persist across deployments.
+
 ## Tested performance
 
 Single H100 80GB, Qwen2.5 0.5B and 1.5B, 512-token outputs, Poisson arrivals (raw JSON in `docs/bench/`):

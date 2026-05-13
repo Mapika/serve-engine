@@ -4,6 +4,7 @@ import asyncio
 import json as _json
 import sqlite3
 from dataclasses import asdict
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -14,9 +15,12 @@ from serve_engine.backends.base import Backend
 from serve_engine.lifecycle.manager import LifecycleManager
 from serve_engine.lifecycle.plan import DeploymentPlan
 from serve_engine.observability.gpu_stats import read_gpu_stats as _read_gpu_stats
+from serve_engine.store import adapters as ad_store
 from serve_engine.store import api_keys as _ak_store
+from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
+from serve_engine.store import snapshots as snapshot_store
 
 
 def _is_uds_request(request: Request) -> bool:
@@ -87,6 +91,7 @@ class CreateDeploymentRequest(BaseModel):
     pinned: bool = False
     idle_timeout_s: int | None = None
     target_concurrency: int | None = None
+    max_loras: int = 0
     extra_args: dict[str, str] = {}
 
 
@@ -135,6 +140,19 @@ async def create_deployment(
     backend = backends[backend_name]
     image_tag = body.image_tag or backend.image_default
     tp = body.tensor_parallel or len(body.gpu_ids)
+    # Mirror --max-lora-rank from extra_args into a first-class plan field
+    # so we can pre-flight adapter rank against it. We don't strip it from
+    # extra_args — the backend still uses extra_args to emit the flag to
+    # the engine container.
+    max_lora_rank = 0
+    raw = body.extra_args.get("--max-lora-rank")
+    if raw:
+        try:
+            max_lora_rank = int(raw)
+        except ValueError as e:
+            raise HTTPException(
+                400, f"--max-lora-rank must be an integer; got {raw!r}",
+            ) from e
     try:
         plan = DeploymentPlan(
             model_name=body.model_name,
@@ -149,11 +167,27 @@ async def create_deployment(
             pinned=body.pinned,
             idle_timeout_s=body.idle_timeout_s,
             target_concurrency=body.target_concurrency,
+            max_loras=body.max_loras,
+            max_lora_rank=max_lora_rank,
             extra_args=dict(body.extra_args),
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    dep = await manager.load(plan)
+    # Backend-aware validation: max_loras > 0 requires an adapter-capable backend.
+    if plan.max_loras > 0 and not backend.supports_adapters:
+        raise HTTPException(
+            400,
+            f"backend {backend_name!r} does not support LoRA adapters; "
+            f"`max_loras` must be 0 (got {plan.max_loras})",
+        )
+    try:
+        dep = await manager.load(plan)
+    except RuntimeError as e:
+        # manager.load raises RuntimeError for client-actionable load
+        # failures: a same-name deployment is pinned, or placement found
+        # no room. Surface as 409 so the CLI's IPC layer extracts the
+        # message instead of showing a bare 500.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
     return {**asdict(dep), "gpu_ids": dep.gpu_ids}
 
 
@@ -227,6 +261,378 @@ def delete_model(name: str, conn: sqlite3.Connection = Depends(get_conn)):
     if m is None:
         raise HTTPException(404, f"model {name!r} not found")
     model_store.delete(conn, m.id)
+
+
+# -------- Adapters (Sub-project A) --------
+
+class CreateAdapterRequest(BaseModel):
+    name: str
+    base_model_name: str
+    hf_repo: str
+    revision: str = "main"
+
+
+@router.get("/adapters")
+def list_adapters(conn: sqlite3.Connection = Depends(get_conn)):
+    """List registered adapters, including which deployments have each loaded."""
+    out = []
+    for a in ad_store.list_all(conn):
+        loaded_into = da_store.find_deployments_with_adapter(conn, a.id)
+        out.append({
+            "id": a.id,
+            "name": a.name,
+            "base": a.base_model.name,
+            "hf_repo": a.hf_repo,
+            "revision": a.revision,
+            "local_path": a.local_path,
+            "size_mb": a.size_mb,
+            "lora_rank": a.lora_rank,
+            "loaded_into": loaded_into,
+            "downloaded": a.local_path is not None,
+            "created_at": a.created_at,
+            "updated_at": a.updated_at,
+        })
+    return out
+
+
+@router.post("/adapters", status_code=status.HTTP_201_CREATED)
+def create_adapter(
+    body: CreateAdapterRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    try:
+        a = ad_store.add(
+            conn,
+            name=body.name,
+            base_model_name=body.base_model_name,
+            hf_repo=body.hf_repo,
+            revision=body.revision,
+        )
+    except ad_store.NameCollision as e:
+        raise HTTPException(409, str(e)) from e
+    except ad_store.BaseNotFound as e:
+        raise HTTPException(404, str(e)) from e
+    return {
+        "id": a.id, "name": a.name, "base": a.base_model.name,
+        "hf_repo": a.hf_repo, "revision": a.revision,
+    }
+
+
+@router.delete("/adapters/{name}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_adapter(
+    name: str,
+    force: bool = False,
+    backends: dict[str, Backend] = Depends(get_backends),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    a = ad_store.get_by_name(conn, name)
+    if a is None:
+        raise HTTPException(404, f"adapter {name!r} not found")
+    deps = da_store.find_deployments_with_adapter(conn, a.id)
+    if deps and not force:
+        raise HTTPException(
+            409,
+            f"adapter {name!r} is loaded into deployments {deps}; "
+            f"hot-unload first or pass ?force=true",
+        )
+    # `force` cascade: hot-unload from each engine, drop junction rows, then
+    # delete the registry row. Adapter blob on disk is NOT auto-deleted —
+    # operator can clean up via the HF cache directly.
+    for dep_id in deps:
+        dep = dep_store.get_by_id(conn, dep_id)
+        if dep is not None:
+            backend = backends.get(dep.backend)
+            if backend is not None:
+                # Best-effort: even if the engine unload fails, we still want
+                # to drop the junction so the registry isn't lying about
+                # what's loaded.
+                try:
+                    await _engine_unload_adapter(backend, dep, a.name)
+                except HTTPException:
+                    pass
+        da_store.detach(conn, dep_id, a.id)
+    ad_store.delete(conn, a.id)
+
+
+@router.post("/adapters/{name}/download")
+async def download_adapter_endpoint(
+    name: str,
+    manager: LifecycleManager = Depends(get_manager),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Synchronously download an adapter's weights to the local cache.
+    Idempotent — returns the existing local_path if already downloaded."""
+    a = ad_store.get_by_name(conn, name)
+    if a is None:
+        raise HTTPException(404, f"adapter {name!r} not registered")
+    if a.local_path is not None:
+        return {
+            "name": a.name, "local_path": a.local_path,
+            "size_mb": a.size_mb, "already_present": True,
+        }
+    from serve_engine.lifecycle.adapter_downloader import (
+        download_adapter,
+        parse_adapter_metadata,
+    )
+    try:
+        local_path, size_mb = await asyncio.to_thread(
+            download_adapter,
+            hf_repo=a.hf_repo,
+            revision=a.revision,
+            cache_dir=manager._models_dir,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"download failed: {e}") from e
+    ad_store.set_local_path(conn, a.id, local_path)
+    ad_store.set_size_mb(conn, a.id, size_mb)
+    # Parse adapter_config.json so we can pre-flight rank against the
+    # deployment's --max-lora-rank at load time. Missing/malformed config
+    # is silently tolerated (parse returns None) — exotic formats still
+    # pull, they just lose the early rank check.
+    meta = parse_adapter_metadata(local_path)
+    if meta is not None and "lora_rank" in meta:
+        ad_store.set_lora_rank(conn, a.id, meta["lora_rank"])
+    return {
+        "name": a.name, "local_path": local_path,
+        "size_mb": size_mb, "already_present": False,
+        "lora_rank": (meta or {}).get("lora_rank"),
+    }
+
+
+@router.post(
+    "/deployments/{dep_id}/adapters/{adapter_name}",
+    status_code=status.HTTP_201_CREATED,
+)
+async def hot_load_adapter(
+    dep_id: int,
+    adapter_name: str,
+    manager: LifecycleManager = Depends(get_manager),
+    backends: dict[str, Backend] = Depends(get_backends),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Hot-load an adapter into a running deployment of its base.
+
+    Steps:
+    1. Validate deployment is ready and backend.supports_adapters.
+    2. Validate adapter exists, is downloaded, and base matches.
+    3. If deployment's adapter slots are full, hot-unload the LRU adapter
+       in the deployment first (the new adapter takes its place).
+    4. POST to the engine's adapter_load_path with lora_name + lora_path.
+    5. On success, attach the (deployment, adapter) row.
+    """
+    import httpx
+
+    dep = dep_store.get_by_id(conn, dep_id)
+    if dep is None:
+        raise HTTPException(404, f"deployment {dep_id} not found")
+    if dep.status != "ready":
+        raise HTTPException(409, f"deployment {dep_id} is {dep.status!r}, not ready")
+    backend = backends.get(dep.backend)
+    if backend is None or not backend.supports_adapters:
+        raise HTTPException(
+            409,
+            f"backend {dep.backend!r} does not support adapter hot-load",
+        )
+    if dep.max_loras <= 0:
+        raise HTTPException(
+            409,
+            f"deployment {dep_id} was started with max_loras=0; "
+            "restart with --max-loras N to enable adapter hot-load",
+        )
+    a = ad_store.get_by_name(conn, adapter_name)
+    if a is None:
+        raise HTTPException(404, f"adapter {adapter_name!r} not registered")
+    if a.local_path is None:
+        raise HTTPException(
+            409,
+            f"adapter {adapter_name!r} not downloaded; "
+            f"POST /admin/adapters/{adapter_name}/download first",
+        )
+    if a.base_model.id != dep.model_id:
+        raise HTTPException(
+            409,
+            f"adapter base {a.base_model.name!r} does not match "
+            f"deployment model_id {dep.model_id}",
+        )
+
+    # If slots full, evict LRU adapter in this deployment first.
+    if da_store.count_for_deployment(conn, dep.id) >= dep.max_loras:
+        victim = da_store.lru_for_deployment(conn, dep.id)
+        if victim is not None and victim.id != a.id:
+            await _engine_unload_adapter(backend, dep, victim.name)
+            da_store.detach(conn, dep.id, victim.id)
+
+    # Translate host adapter path into in-container path (mounted at /cache).
+    container_path = "/cache/" + str(
+        Path(a.local_path).resolve().relative_to(manager._models_dir.resolve())
+    )
+    body = {"lora_name": a.name, "lora_path": container_path}
+    url = (
+        f"http://{dep.container_address}:{dep.container_port}"
+        f"{backend.adapter_load_path}"
+    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            r = await client.post(url, json=body)
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"engine adapter load failed: {e}") from e
+    if r.status_code >= 400:
+        raise HTTPException(
+            502, f"engine returned {r.status_code}: {r.text[:200]}",
+        )
+    da_store.attach(conn, dep.id, a.id)
+    return {
+        "deployment_id": dep.id, "adapter": a.name,
+        "evicted": victim.name if 'victim' in locals() and victim else None,
+    }
+
+
+@router.delete(
+    "/deployments/{dep_id}/adapters/{adapter_name}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def hot_unload_adapter(
+    dep_id: int,
+    adapter_name: str,
+    backends: dict[str, Backend] = Depends(get_backends),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    dep = dep_store.get_by_id(conn, dep_id)
+    if dep is None:
+        raise HTTPException(404, f"deployment {dep_id} not found")
+    a = ad_store.get_by_name(conn, adapter_name)
+    if a is None:
+        raise HTTPException(404, f"adapter {adapter_name!r} not registered")
+    backend = backends.get(dep.backend)
+    if backend is None:
+        raise HTTPException(409, f"backend {dep.backend!r} not registered")
+    await _engine_unload_adapter(backend, dep, a.name)
+    da_store.detach(conn, dep.id, a.id)
+
+
+async def _engine_unload_adapter(
+    backend: Backend, dep, adapter_name: str,
+) -> None:
+    """POST to the engine's unload path. Best-effort — if the engine
+    container is gone the unload still succeeds at the registry level
+    (via the surrounding detach call)."""
+    import httpx
+
+    url = (
+        f"http://{dep.container_address}:{dep.container_port}"
+        f"{backend.adapter_unload_path}"
+    )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            r = await client.post(url, json={"lora_name": adapter_name})
+        except httpx.HTTPError:
+            return  # engine gone; let detach proceed
+    if r.status_code >= 500:
+        # 4xx is fine (e.g., adapter wasn't loaded after all). 5xx means
+        # the engine is in a bad state — surface it.
+        raise HTTPException(
+            502, f"engine returned {r.status_code} on unload: {r.text[:200]}",
+        )
+
+
+# -------- Snapshots (Sub-project B) --------
+
+
+class SnapshotGcRequest(BaseModel):
+    keep_last_per_model: int = 2
+    max_disk_gb: float | None = None
+
+
+@router.get("/snapshots")
+def list_snapshots(conn: sqlite3.Connection = Depends(get_conn)):
+    """List all snapshot index rows, newest-used first."""
+    return [
+        {
+            **asdict(s),
+            "key_prefix": s.key[:8],
+        }
+        for s in snapshot_store.list_all(conn)
+    ]
+
+
+@router.delete("/snapshots/{key}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_snapshot(
+    key: str,
+    conn: sqlite3.Connection = Depends(get_conn),
+    manager: LifecycleManager = Depends(get_manager),
+):
+    """Remove a snapshot's index row + on-disk dir. Passing key='all' wipes
+    every snapshot (manual reset; the GC endpoint is the usual path)."""
+    from serve_engine.lifecycle.snapshot_gc import _remove_blob
+    if key == "all":
+        for s in snapshot_store.list_all(conn):
+            _remove_blob(Path(s.local_path))
+            snapshot_store.delete(conn, s.id)
+        return
+    s = snapshot_store.get_by_key(conn, key)
+    if s is None:
+        raise HTTPException(404, f"snapshot {key!r} not found")
+    _remove_blob(Path(s.local_path))
+    snapshot_store.delete(conn, s.id)
+
+
+@router.get("/predictor/candidates")
+def predictor_candidates(request: Request):
+    """Current top-N predictor candidates with score + reason. Drives
+    `serve predict`."""
+    task = getattr(request.app.state, "predictor_task", None)
+    if task is None:
+        return []
+    cands = task._predictor.candidates()
+    return [
+        {
+            "base_name": c.base_name,
+            "adapter_name": c.adapter_name,
+            "score": round(c.score, 4),
+            "reason": c.reason,
+        }
+        for c in cands
+    ]
+
+
+@router.get("/predictor/stats")
+def predictor_stats(request: Request):
+    """Tick-loop counters since daemon startup. Drives `serve predict --stats`."""
+    task = getattr(request.app.state, "predictor_task", None)
+    if task is None:
+        return {
+            "enabled": False,
+            "preloads_attempted": 0,
+            "preloads_succeeded": 0,
+            "preloads_skipped_already_warm": 0,
+            "preloads_skipped_no_deployment": 0,
+        }
+    return {
+        "enabled": task._config.enabled,
+        "tick_interval_s": task._config.tick_interval_s,
+        "max_prewarm_per_tick": task._config.max_prewarm_per_tick,
+        "preloads_attempted": task.preloads_attempted,
+        "preloads_succeeded": task.preloads_succeeded,
+        "preloads_skipped_already_warm": task.preloads_skipped_already_warm,
+        "preloads_skipped_no_deployment": task.preloads_skipped_no_deployment,
+    }
+
+
+@router.post("/snapshots/gc")
+def gc_snapshots(
+    body: SnapshotGcRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    manager: LifecycleManager = Depends(get_manager),
+):
+    """Two-step eviction: (1) per-(engine, hf_repo) keep newest N, drop
+    the rest; (2) if max_disk_gb is set and the total still exceeds it,
+    LRU-evict globally until under cap. Shared with the background loop."""
+    from serve_engine.lifecycle.snapshot_gc import run_gc
+    return run_gc(
+        conn,
+        keep_last_per_model=body.keep_last_per_model,
+        max_disk_gb=body.max_disk_gb,
+    )
 
 
 @router.post("/deployments/{dep_id}/pin", status_code=status.HTTP_204_NO_CONTENT)
