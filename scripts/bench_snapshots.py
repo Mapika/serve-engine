@@ -130,7 +130,16 @@ class AdminClient:
             if r.status_code not in (200, 201, 409):
                 r.raise_for_status()
 
-    async def create_deployment(self, model_name: str, hf_repo: str, gpu_id: int) -> int:
+    async def create_deployment(
+        self,
+        model_name: str,
+        hf_repo: str,
+        gpu_id: int,
+        gpu_mem_util: float | None = None,
+    ) -> int:
+        extra: dict[str, str] = {}
+        if gpu_mem_util is not None:
+            extra["--gpu-memory-utilization"] = f"{gpu_mem_util:.3f}"
         async with self._client() as c:
             r = await c.post(
                 "/admin/deployments",
@@ -140,6 +149,7 @@ class AdminClient:
                     "gpu_ids": [gpu_id],
                     "pinned": False,
                     "max_model_len": 4096,
+                    "extra_args": extra,
                 },
             )
             r.raise_for_status()
@@ -203,12 +213,13 @@ async def one_run(
     hf_repo: str,
     gpu_id: int,
     poll_interval_s: float = 1.0,
+    gpu_mem_util: float | None = None,
 ) -> RunResult:
     """One full timed cycle: create deployment → wait ready → measure TTFT → delete."""
     try:
         await client.ensure_model(model_name, hf_repo)
         t0 = time.monotonic()
-        dep_id = await client.create_deployment(model_name, hf_repo, gpu_id)
+        dep_id = await client.create_deployment(model_name, hf_repo, gpu_id, gpu_mem_util)
         await client.wait_ready(dep_id, poll_interval_s)
         ready_s = time.monotonic() - t0
         ttft_s = await client.first_ttft(model_name)
@@ -263,6 +274,7 @@ async def benchmark(
     snapshots_dir: Path,
     poll_interval_s: float = 1.0,
     snapshot_save_timeout_s: float = 120.0,
+    gpu_mem_util: float | None = None,
 ) -> dict[str, list[RunResult]]:
     """Run `runs` cold passes then `runs` warm passes. Returns both lists."""
     client = AdminClient(sock)
@@ -276,6 +288,7 @@ async def benchmark(
             hf_repo=hf_repo,
             gpu_id=gpu_id,
             poll_interval_s=poll_interval_s,
+            gpu_mem_util=gpu_mem_util,
         )
         cold.append(r)
         # Give the daemon time to persist the snapshot before the next cold run
@@ -291,6 +304,7 @@ async def benchmark(
             hf_repo=hf_repo,
             gpu_id=gpu_id,
             poll_interval_s=poll_interval_s,
+            gpu_mem_util=gpu_mem_util,
         )
         warm.append(r)
 
@@ -314,6 +328,11 @@ def main() -> int:
         default=Path.home() / ".serve" / "snapshots",
     )
     p.add_argument("--gpu-id", type=int, default=0)
+    p.add_argument(
+        "--gpu-mem-util", type=float, default=None,
+        help="vLLM --gpu-memory-utilization fraction (0.0-1.0). "
+             "Omit for vLLM default (~0.9). Constrain on shared GPUs.",
+    )
     args = p.parse_args()
 
     if not args.sock.exists():
@@ -336,6 +355,7 @@ def main() -> int:
         gpu_id=args.gpu_id,
         runs=args.runs,
         snapshots_dir=args.snapshots_dir,
+        gpu_mem_util=args.gpu_mem_util,
     ))
 
     cold_agg = aggregate(result["cold"])
@@ -356,6 +376,7 @@ def main() -> int:
         "model": hf_repo,
         "engine": "vllm",
         "runs": args.runs,
+        "gpu_mem_util": args.gpu_mem_util,
         "hardware": gpu_fingerprint(),
         "serve_engine_git_sha": git_sha,
         "cold": {
