@@ -117,6 +117,31 @@ async def test_create_deployment_passes_extra_args_to_argv(app):
 
 
 @pytest.mark.asyncio
+async def test_predictor_candidates_endpoint(app):
+    """/admin/predictor/candidates returns a list of {model, score, reason}.
+    With a fresh empty DB the list is empty — the endpoint should not 500."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/admin/predictor/candidates")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+@pytest.mark.asyncio
+async def test_predictor_stats_endpoint(app):
+    """/admin/predictor/stats returns the tick-loop counters even before
+    the first tick has run."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/admin/predictor/stats")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["preloads_attempted"] == 0
+    assert body["preloads_succeeded"] == 0
+    assert "enabled" in body
+
+
+@pytest.mark.asyncio
 async def test_snapshot_endpoints_list_delete_gc(app, tmp_path):
     """End-to-end /admin/snapshots: list returns rows, DELETE by key wipes
     the row + on-disk dir, gc honors keep_last_per_model and removes the

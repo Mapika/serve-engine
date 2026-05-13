@@ -576,6 +576,48 @@ def delete_snapshot(
     snapshot_store.delete(conn, s.id)
 
 
+@router.get("/predictor/candidates")
+def predictor_candidates(request: Request):
+    """Current top-N predictor candidates with score + reason. Drives
+    `serve predict`."""
+    task = getattr(request.app.state, "predictor_task", None)
+    if task is None:
+        return []
+    cands = task._predictor.candidates()
+    return [
+        {
+            "base_name": c.base_name,
+            "adapter_name": c.adapter_name,
+            "score": round(c.score, 4),
+            "reason": c.reason,
+        }
+        for c in cands
+    ]
+
+
+@router.get("/predictor/stats")
+def predictor_stats(request: Request):
+    """Tick-loop counters since daemon startup. Drives `serve predict --stats`."""
+    task = getattr(request.app.state, "predictor_task", None)
+    if task is None:
+        return {
+            "enabled": False,
+            "preloads_attempted": 0,
+            "preloads_succeeded": 0,
+            "preloads_skipped_already_warm": 0,
+            "preloads_skipped_no_deployment": 0,
+        }
+    return {
+        "enabled": task._config.enabled,
+        "tick_interval_s": task._config.tick_interval_s,
+        "max_prewarm_per_tick": task._config.max_prewarm_per_tick,
+        "preloads_attempted": task.preloads_attempted,
+        "preloads_succeeded": task.preloads_succeeded,
+        "preloads_skipped_already_warm": task.preloads_skipped_already_warm,
+        "preloads_skipped_no_deployment": task.preloads_skipped_no_deployment,
+    }
+
+
 @router.post("/snapshots/gc")
 def gc_snapshots(
     body: SnapshotGcRequest,

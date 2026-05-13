@@ -130,6 +130,7 @@ def build_apps(
 
     tcp_app = FastAPI(title="serve-engine (public)", version="0.0.1", lifespan=lifespan)
     _attach_state(tcp_app, conn=conn, backends=backends, manager=manager, event_bus=event_bus)
+    tcp_app.state.predictor_task = predictor_task
     tcp_app.include_router(openai_router)
     tcp_app.include_router(metrics_router)
     tcp_app.include_router(admin_router)
@@ -137,6 +138,7 @@ def build_apps(
 
     uds_app = FastAPI(title="serve-engine (control)", version="0.0.1")
     _attach_state(uds_app, conn=conn, backends=backends, manager=manager, event_bus=event_bus)
+    uds_app.state.predictor_task = predictor_task
     uds_app.include_router(openai_router)
     uds_app.include_router(admin_router)
     uds_app.include_router(metrics_router)
