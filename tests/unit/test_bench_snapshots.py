@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from unittest.mock import patch
 
 import pytest
+import uvicorn
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 
 from scripts.bench_snapshots import (
     RunResult,
@@ -10,6 +15,86 @@ from scripts.bench_snapshots import (
     gpu_fingerprint,
     to_markdown,
 )
+
+
+@asynccontextmanager
+async def fake_daemon(tmp_path):
+    """In-process FastAPI server on a UDS socket. Simulates the admin
+    surface bench_snapshots needs: model registration, deployment
+    create / list / delete, plus a fake streaming chat completion."""
+    app = FastAPI()
+    state = {"next_id": 1, "deps": {}, "poll_count": {}}
+
+    @app.post("/admin/models", status_code=201)
+    async def create_model(body: dict):
+        return {"name": body["name"]}
+
+    @app.post("/admin/deployments", status_code=201)
+    async def create_dep(body: dict):
+        did = state["next_id"]
+        state["next_id"] += 1
+        state["deps"][did] = {
+            "id": did, "status": "loading", "model_name": body["model_name"],
+        }
+        state["poll_count"][did] = 0
+        return state["deps"][did]
+
+    @app.get("/admin/deployments")
+    async def list_deps():
+        out = []
+        for did, d in state["deps"].items():
+            state["poll_count"][did] += 1
+            if state["poll_count"][did] >= 2 and d["status"] == "loading":
+                d["status"] = "ready"
+            out.append(d)
+        return out
+
+    @app.delete("/admin/deployments/{dep_id}", status_code=204)
+    async def del_dep(dep_id: int):
+        state["deps"].pop(dep_id, None)
+        return None
+
+    @app.post("/v1/chat/completions")
+    async def chat(body: dict):
+        async def gen():
+            await asyncio.sleep(0.01)
+            yield b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+            yield b'data: [DONE]\n\n'
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    sock = tmp_path / "fake.sock"
+    config = uvicorn.Config(app, uds=str(sock), log_level="warning")
+    server = uvicorn.Server(config)
+    task = asyncio.create_task(server.serve())
+    for _ in range(50):
+        if sock.exists():
+            break
+        await asyncio.sleep(0.02)
+    try:
+        yield sock
+    finally:
+        server.should_exit = True
+        with suppress(asyncio.CancelledError, asyncio.TimeoutError):
+            await asyncio.wait_for(task, timeout=2.0)
+
+
+@pytest.mark.asyncio
+async def test_one_run_against_fake_daemon(tmp_path):
+    from scripts.bench_snapshots import AdminClient, one_run
+    async with fake_daemon(tmp_path) as sock:
+        client = AdminClient(sock)
+        result = await one_run(
+            client,
+            model_name="test-model",
+            hf_repo="test/m",
+            gpu_id=0,
+            poll_interval_s=0.01,
+        )
+    assert result.ok is True, f"run failed: {result.error}"
+    assert result.error is None
+    assert result.ready_s > 0
+    assert result.ttft_s > 0
+    assert result.total_s >= result.ready_s + result.ttft_s - 0.001  # rounding
 
 
 def test_gpu_fingerprint_parses_nvidia_smi():

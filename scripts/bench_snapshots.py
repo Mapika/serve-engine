@@ -17,9 +17,12 @@ import json
 import statistics
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 
 @dataclass
@@ -100,6 +103,124 @@ def to_markdown(cold: dict[str, Any], warm: dict[str, Any]) -> str:
     for name, c, w in rows:
         lines.append(f"| {name:<20} | {c:>16.2f}s | {w:>19.2f}s | {speedup(c, w):>7} |")
     return "\n".join(lines)
+
+
+class AdminClient:
+    """Thin async client over the daemon UDS socket. UDS path bypasses
+    admin auth (the daemon trusts anything on the socket — same trust
+    model the CLI uses)."""
+
+    def __init__(self, sock: Path):
+        self._sock = sock
+
+    def _client(self) -> httpx.AsyncClient:
+        transport = httpx.AsyncHTTPTransport(uds=str(self._sock))
+        return httpx.AsyncClient(
+            transport=transport,
+            base_url="http://localhost",
+            timeout=120.0,
+        )
+
+    async def ensure_model(self, name: str, hf_repo: str) -> None:
+        """Register the model. If it already exists, the daemon returns
+        4xx — that's fine, we swallow it."""
+        async with self._client() as c:
+            r = await c.post("/admin/models", json={"name": name, "hf_repo": hf_repo})
+            if r.status_code not in (200, 201, 409):
+                r.raise_for_status()
+
+    async def create_deployment(self, model_name: str, hf_repo: str, gpu_id: int) -> int:
+        async with self._client() as c:
+            r = await c.post(
+                "/admin/deployments",
+                json={
+                    "model_name": model_name,
+                    "hf_repo": hf_repo,
+                    "gpu_ids": [gpu_id],
+                    "pinned": False,
+                    "max_model_len": 4096,
+                },
+            )
+            r.raise_for_status()
+            return r.json()["id"]
+
+    async def wait_ready(
+        self, dep_id: int, poll_interval_s: float, timeout_s: float = 600.0,
+    ) -> None:
+        deadline = time.monotonic() + timeout_s
+        async with self._client() as c:
+            while True:
+                r = await c.get("/admin/deployments")
+                r.raise_for_status()
+                deps = {d["id"]: d for d in r.json()}
+                d = deps.get(dep_id)
+                if d is None:
+                    raise RuntimeError(f"deployment {dep_id} disappeared")
+                if d["status"] == "ready":
+                    return
+                if d["status"] == "failed":
+                    raise RuntimeError(
+                        f"deployment {dep_id} failed: {d.get('last_error')}",
+                    )
+                if time.monotonic() > deadline:
+                    raise TimeoutError(
+                        f"deployment {dep_id} not ready after {timeout_s}s",
+                    )
+                await asyncio.sleep(poll_interval_s)
+
+    async def first_ttft(self, model_name: str) -> float:
+        """Send a chat completion, measure wallclock to first byte of the
+        first SSE token chunk. Streams so we genuinely measure TTFT,
+        not full-response latency."""
+        async with self._client() as c:
+            t0 = time.monotonic()
+            async with c.stream(
+                "POST",
+                "/v1/chat/completions",
+                json={
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 4,
+                    "stream": True,
+                },
+            ) as r:
+                r.raise_for_status()
+                async for chunk in r.aiter_bytes():
+                    if b"data:" in chunk and b"[DONE]" not in chunk:
+                        return time.monotonic() - t0
+            raise RuntimeError("stream ended without a token")
+
+    async def delete_deployment(self, dep_id: int) -> None:
+        async with self._client() as c:
+            await c.delete(f"/admin/deployments/{dep_id}")
+
+
+async def one_run(
+    client: AdminClient,
+    *,
+    model_name: str,
+    hf_repo: str,
+    gpu_id: int,
+    poll_interval_s: float = 1.0,
+) -> RunResult:
+    """One full timed cycle: create deployment → wait ready → measure TTFT → delete."""
+    try:
+        await client.ensure_model(model_name, hf_repo)
+        t0 = time.monotonic()
+        dep_id = await client.create_deployment(model_name, hf_repo, gpu_id)
+        await client.wait_ready(dep_id, poll_interval_s)
+        ready_s = time.monotonic() - t0
+        ttft_s = await client.first_ttft(model_name)
+        await client.delete_deployment(dep_id)
+        return RunResult(
+            ready_s=ready_s,
+            ttft_s=ttft_s,
+            total_s=ready_s + ttft_s,
+            ok=True,
+            error=None,
+        )
+    except Exception as e:
+        return RunResult(ready_s=0.0, ttft_s=0.0, total_s=0.0, ok=False, error=str(e))
 
 
 def main() -> int:
