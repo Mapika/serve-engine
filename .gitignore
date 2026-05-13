@@ -11,3 +11,9 @@ ui/node_modules/
 ui/dist/
 ui/tsconfig.tsbuildinfo
 .claude/
+
+# Local cruft — playwright MCP, ad-hoc screenshots, console dumps
+.playwright-mcp/
+console-*.log
+page-*.yml
+/*.png

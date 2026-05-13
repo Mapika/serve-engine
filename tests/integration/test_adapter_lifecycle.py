@@ -5,7 +5,7 @@ router + lifecycle) against a fake engine that records every adapter
 load/unload + chat-completion call. No real GPU; no real container.
 
 Acceptance: walks the 8-step flow from
-docs/superpowers/plans/2026-05-13-adapter-lifecycle-plan.md Task 11.
+docs/design/plans/2026-05-13-adapter-lifecycle-plan.md Task 11.
 """
 import asyncio
 from unittest.mock import AsyncMock, MagicMock

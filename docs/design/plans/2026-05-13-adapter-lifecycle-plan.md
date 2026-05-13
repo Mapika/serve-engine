@@ -1,11 +1,9 @@
 # Sub-project A — Adapter-First Lifecycle: Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax.
-
 **Goal:** Land adapter-as-first-class-entity on `feat/v2-loading`. After this plan, registering a LoRA adapter is one CLI call; OpenAI clients can address it as `model='<adapter-name>'`; the proxy hot-loads the adapter into a running deployment of its base in sub-second time and dispatches the request there.
 
 **Branch:** `feat/v2-loading` (off `main`).
-**Companion design:** `docs/superpowers/specs/2026-05-13-adapter-lifecycle-design.md`.
+**Companion design:** `docs/design/specs/2026-05-13-adapter-lifecycle-design.md`.
 **Subsequent work:** Sub-project B (Snapshot system) and C (Predictive layer) land on the same branch in subsequent plans. Sub-project D (Federation) branches off this one.
 
 **Tech stack:** Same as v1. New: dynamic LoRA load/unload via vLLM `/v1/load_lora_adapter` and SGLang `/load_lora_adapter` (HTTP, no new Python deps).

@@ -1,7 +1,5 @@
 # Serving Engine — Plan 07: Doctor + Installer + Daemon-as-Container
 
-> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development.
-
 **Goal:** Make installation and diagnosis trivial. Three deliverables:
 
 1. **`serve doctor`** — top-down environment check: CUDA driver, Docker, nvidia-container-toolkit, GPU enumeration, NVLink topology, port availability, `~/.serve` writability, HF_TOKEN, cached engine images, daemon status.

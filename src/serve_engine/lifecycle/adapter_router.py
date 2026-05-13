@@ -5,7 +5,7 @@ one async helper (`ensure_adapter_loaded`) that handles the
 hot-load-when-needed case the proxy hits on a request for an adapter
 that's not yet in any deployment.
 
-Design: see docs/superpowers/specs/2026-05-13-adapter-lifecycle-design.md §7.
+Design: see docs/design/specs/2026-05-13-adapter-lifecycle-design.md §7.
 """
 from __future__ import annotations
 

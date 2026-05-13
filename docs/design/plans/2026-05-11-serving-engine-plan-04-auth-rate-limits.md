@@ -1,7 +1,5 @@
 # Serving Engine — Plan 04: API Keys + Multi-Window Rate Limits
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax.
-
 **Goal:** Bearer-token auth with proper rate limits at minute / hour / day / week scales (RPM, RPH, RPD, RPW for requests and TPM, TPH, TPD, TPW for tokens), matching what OpenAI / Anthropic / other inference providers expose. Returns `429 Too Many Requests` with `Retry-After` when a limit is hit.
 
 **Architecture:** A `key_store` table for hashed keys, a `key_usage_events` table that records `(key_id, ts, requests, tokens_in, tokens_out)` per request. The rate limiter is a sliding-window log over `key_usage_events` — straightforward to implement, simple to reason about, and fast enough for tens of QPS on SQLite. A FastAPI dependency wraps every `/v1/*` route. Admin endpoints + CLI to manage keys and tier definitions. Tiers live in YAML so a homelab can run with one tier ("admin") while a company defines many.

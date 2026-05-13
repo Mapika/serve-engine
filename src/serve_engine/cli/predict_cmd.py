@@ -1,6 +1,6 @@
 """serve predict — show predictor candidates, tick stats, or replay a trace.
 
-Spec: docs/superpowers/specs/2026-05-13-predictive-layer-design.md §7.
+Spec: docs/design/specs/2026-05-13-predictive-layer-design.md §7.
 
 Modes:
 - (default)     current top predictor candidates

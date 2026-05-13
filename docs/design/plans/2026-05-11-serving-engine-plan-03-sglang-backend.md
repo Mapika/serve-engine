@@ -1,7 +1,5 @@
 # Serving Engine — Plan 03: SGLang Backend
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax.
-
 **Goal:** Add SGLang as a second engine backend. Validate the `Backend` Protocol we built in Plan 01 actually pluggable. Engine selection is data-driven via YAML — autotune logic is parked.
 
 **Architecture:** New `SGLangBackend` class implementing the same `Backend` Protocol as `VLLMBackend`. A `backends.yaml` manifest pins upstream image tags. A `selection.yaml` maps model patterns → preferred engine. The manager picks the backend either from `--engine` CLI flag, the selection rules, or default vLLM.

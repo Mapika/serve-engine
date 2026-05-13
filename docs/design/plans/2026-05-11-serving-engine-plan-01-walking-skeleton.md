@@ -1,7 +1,5 @@
 # Serving Engine — Plan 01: Walking Skeleton
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Build a single-model serving daemon: user can `serve daemon start`, `serve pull meta-llama/Llama-3.2-1B-Instruct`, `serve run meta-llama/Llama-3.2-1B-Instruct`, and then hit `POST /v1/chat/completions` and receive a streamed response from a vLLM container that the daemon spawned and supervises.
 
 **Architecture:** Python daemon (FastAPI + uvicorn) that exposes a public TCP port for inference requests and a Unix domain socket for CLI commands. The daemon supervises exactly one vLLM container at a time, talking to it over Docker's bridge network. Persistent state in SQLite. CLI (Typer) is a thin HTTP-over-UDS client. No auth, no multi-model, no autotune in this plan — those come in Plans 02–05.
@@ -186,8 +184,8 @@ dist/
 
 Single-node multi-user inference orchestrator over vLLM (and later SGLang).
 
-Work in progress — see `docs/superpowers/specs/` for the design and
-`docs/superpowers/plans/` for implementation plans.
+Work in progress — see `docs/design/specs/` for the design and
+`docs/design/plans/` for implementation plans.
 ```
 
 - [ ] **Step 7: Verify the project installs and the smoke test passes**
@@ -2941,7 +2939,7 @@ serve daemon stop
 - No autotune. You pass `--gpu`, `--ctx`, `--dtype` yourself.
 - No web UI.
 
-See `docs/superpowers/specs/` for the full design and `docs/superpowers/plans/` for the planned slices.
+See `docs/design/specs/` for the full design and `docs/design/plans/` for the planned slices.
 
 ## Development
 

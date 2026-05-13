@@ -4,7 +4,7 @@ A single-node, multi-user LLM inference orchestrator over vLLM, SGLang, and Tens
 
 `serve-engine` solves the operator-UX gap left by `vllm serve` / `python -m sglang.launch_server` / `trtllm-serve`: one daemon, multiple models, pin / auto-swap lifecycle, OpenAI-compatible HTTP, API keys with proper rate limits, a small web UI, and live observability — on one GPU box.
 
-**Status:** core lifecycle, observability, auth, and three engine backends (vLLM, SGLang, TensorRT-LLM) verified end-to-end on H100 and RTX PRO 6000 Blackwell. 156 unit + integration tests, ruff clean.
+**Status:** core lifecycle, observability, auth, and three engine backends (vLLM, SGLang, TensorRT-LLM) verified end-to-end on H100 and RTX PRO 6000 Blackwell. 363 unit + integration tests, ruff clean.
 
 ## What it does
 
@@ -170,7 +170,7 @@ Engine saturation on the small Qwens is ~14k tokens/sec aggregate.
 
 ## Design docs and plans
 
-The implementation was built in seven stacked plans (`docs/superpowers/plans/`) plus an initial design (`docs/superpowers/specs/`). Each plan was verified live on an H100 before the next one started.
+The implementation was built in seven stacked plans (`docs/design/plans/`) plus an initial design (`docs/design/specs/`). Each plan was verified live on an H100 before the next one started.
 
 - Plan 01 — walking skeleton (daemon + CLI + vLLM container)
 - Plan 02 — multi-model lifecycle (pin / auto-swap / KV-aware placement)
@@ -186,7 +186,7 @@ The implementation was built in seven stacked plans (`docs/superpowers/plans/`) 
 ```bash
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
-pytest                    # 131 tests, ~12s
+pytest                    # 363 tests, ~30s
 ruff check src/ tests/
 
 # UI dev (optional — repo ships pre-built dist)
@@ -202,4 +202,4 @@ cd ui && npm install && npm run build
 
 ## License
 
-TBD.
+Apache 2.0 — see [LICENSE](LICENSE).

@@ -7,7 +7,7 @@ replay tool answers "how would this trace have looked under naive LRU?" so
 we can attribute the delta to the predictor.
 
 Pure functions over a list of recorded events; zero daemon coupling.
-Companion design: docs/superpowers/specs/2026-05-13-predictive-layer-design.md
+Companion design: docs/design/specs/2026-05-13-predictive-layer-design.md
 """
 from __future__ import annotations
 

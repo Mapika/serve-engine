@@ -2,7 +2,7 @@
 
 Snapshots are the bind-mounted torch.compile inductor caches that let a
 re-deployment with the same shape skip compilation. Spec:
-docs/superpowers/specs/2026-05-13-snapshot-system-design.md §8.
+docs/design/specs/2026-05-13-snapshot-system-design.md §8.
 """
 from __future__ import annotations
 

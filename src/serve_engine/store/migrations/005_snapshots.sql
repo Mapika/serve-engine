@@ -4,7 +4,7 @@
 -- populated NULL/local-time until Sub-project D wires sync.
 --
 -- The `key` column is the content-addressable hash described in
--- docs/superpowers/specs/2026-05-13-snapshot-system-design.md §3.
+-- docs/design/specs/2026-05-13-snapshot-system-design.md §3.
 -- Two deployments with the same key share a snapshot.
 
 CREATE TABLE IF NOT EXISTS snapshots (

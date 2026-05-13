@@ -14,7 +14,7 @@ deployments table alone isn't sufficient because:
   what the operator specified — replaying needs the *operator's* intent,
   not the manager's resolved values.
 
-Companion design: docs/superpowers/specs/2026-05-13-predictive-layer-design.md
+Companion design: docs/design/specs/2026-05-13-predictive-layer-design.md
 """
 from __future__ import annotations
 

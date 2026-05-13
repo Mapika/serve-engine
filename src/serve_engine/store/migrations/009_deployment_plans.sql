@@ -7,7 +7,7 @@
 -- as JSON at load() time and mark it `reached_ready_at` only when the
 -- engine actually became healthy. Predictor mines `MAX(reached_ready_at)`
 -- per model to reconstruct a plan it can hand back to manager.load().
--- Companion design: docs/superpowers/specs/2026-05-13-predictive-layer-design.md
+-- Companion design: docs/design/specs/2026-05-13-predictive-layer-design.md
 
 CREATE TABLE IF NOT EXISTS deployment_plans (
     id                INTEGER PRIMARY KEY,

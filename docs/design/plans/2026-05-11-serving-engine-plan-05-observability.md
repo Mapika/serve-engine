@@ -1,7 +1,5 @@
 # Serving Engine — Plan 05: Observability
 
-> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax.
-
 **Goal:** Make the daemon legible. Three surfaces: `GET /metrics` (Prometheus-format, aggregated from engines + daemon), `GET /admin/events` (SSE event stream for lifecycle transitions), `GET /admin/gpus` (live per-GPU memory and utilization). One new CLI command: `serve top` — htop-style live view of deployments, GPUs, and request rate. No new third-party libraries; we generate Prometheus text by hand and use the existing `pynvml` for GPU stats.
 
 **Architecture:** A small in-process event bus (`asyncio.Queue` fanout) collects lifecycle events emitted by `LifecycleManager`. The SSE endpoint subscribes per-request and forwards. `/metrics` proxies each engine's `/metrics` and concatenates them with daemon-level metrics (requests served, deployments by state, etc.). `serve top` uses the events stream + a poll on `/admin/gpus` and `/admin/deployments`.

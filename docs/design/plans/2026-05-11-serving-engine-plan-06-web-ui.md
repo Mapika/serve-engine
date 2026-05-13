@@ -1,7 +1,5 @@
 # Serving Engine — Plan 06: Web UI
 
-> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development.
-
 **Goal:** A small, tasteful web UI served by the daemon at `http://localhost:<port>/`. Five screens: Dashboard, Models, Playground, API Keys, Logs. Consumes the admin endpoints + SSE event stream + `/v1/chat/completions`.
 
 **Architecture decisions (pragmatic):**

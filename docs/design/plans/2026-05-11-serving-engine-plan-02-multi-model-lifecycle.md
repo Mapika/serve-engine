@@ -1,7 +1,5 @@
 # Serving Engine — Plan 02: Multi-Model Lifecycle
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Lift Plan 01's single-deployment restriction. The daemon now hosts N concurrent deployments, with explicit pin/auto-swap semantics, GPU-topology-aware placement, KV-cache-aware VRAM accounting, and LRU/idle eviction.
 
 **Architecture:** Add a placement layer between the lifecycle manager and the Docker client. The manager no longer "stops the previous" — it asks placement for a GPU set, evicting auto deployments as needed. Routing changes from "find_active" to "find by model name." Pinned deployments are immune to eviction; auto deployments age out by idle timeout or get evicted to make room.

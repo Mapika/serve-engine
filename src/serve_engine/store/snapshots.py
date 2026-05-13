@@ -4,7 +4,7 @@ Tracks the (key, hf_repo, engine, gpu_arch, quant, shape) → on-disk
 snapshot mapping. The blob itself lives under the configured
 SNAPSHOTS_DIR; this row is the metadata.
 
-Companion design: docs/superpowers/specs/2026-05-13-snapshot-system-design.md
+Companion design: docs/design/specs/2026-05-13-snapshot-system-design.md
 """
 from __future__ import annotations
 

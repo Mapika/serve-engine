@@ -2,7 +2,7 @@
 -- Each request inserts one row at dispatch time; the predictor mines this
 -- table for time-of-day, sequencing, and key-affinity patterns.
 -- Federation-ready (source_peer_id) populated NULL until Sub-project D.
--- Companion design: docs/superpowers/specs/2026-05-13-predictive-layer-design.md
+-- Companion design: docs/design/specs/2026-05-13-predictive-layer-design.md
 
 CREATE TABLE IF NOT EXISTS usage_events (
     id              INTEGER PRIMARY KEY,

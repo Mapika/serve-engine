@@ -1,7 +1,7 @@
 """serve adapter — register/download/load/unload LoRA adapters.
 
 Mirrors the design in
-docs/superpowers/specs/2026-05-13-adapter-lifecycle-design.md §4.
+docs/design/specs/2026-05-13-adapter-lifecycle-design.md §4.
 """
 from __future__ import annotations
 

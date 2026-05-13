@@ -1,7 +1,5 @@
 # Serving Engine — Plan 08: Hardening
 
-> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Tight scope: fix real bugs identified in the post-Plan-07 review. No new features.
-
 **Goal:** address the 9 issues + 4 nits surfaced when reviewing the system after Plan 07. Minimize new code; prefer fixes over rewrites.
 
 ---

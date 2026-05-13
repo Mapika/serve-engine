@@ -6,7 +6,7 @@ columns only. Larger reasoning artifacts (per-token logs, full
 prompts) are out of scope; if we ever want them they go to a
 separate, opt-in `request_logs` table.
 
-Companion design: docs/superpowers/specs/2026-05-13-predictive-layer-design.md
+Companion design: docs/design/specs/2026-05-13-predictive-layer-design.md
 """
 from __future__ import annotations
 
