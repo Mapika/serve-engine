@@ -65,6 +65,14 @@ class PredictorConfig:
     tick_interval_s: int = 30
     max_prewarm_per_tick: int = 2
     retention_days: int = 30
+    # Base pre-warming budget — separate from adapter pre-warming because
+    # starting a base from scratch is 30-60s of engine warmup + a Docker
+    # container, far more disruptive than a sub-second LoRA hot-load. Default
+    # of 1 keeps the loop conservative; 0 disables base pre-warming entirely
+    # (the v2.0 behavior). The base only fires when we have a recorded plan
+    # in `deployment_plans.reached_ready_at` — predictor never invents a
+    # config it has never seen succeed.
+    max_base_prewarm_per_tick: int = 1
     time_of_day: RuleConfig = field(default_factory=RuleConfig)
     sequencing: SequencingConfig = field(default_factory=SequencingConfig)
     key_affinity: KeyAffinityConfig = field(default_factory=KeyAffinityConfig)
@@ -92,6 +100,9 @@ class PredictorConfig:
             tick_interval_s=int(data.get("tick_interval_s", defaults.tick_interval_s)),
             max_prewarm_per_tick=int(data.get(
                 "max_prewarm_per_tick", defaults.max_prewarm_per_tick,
+            )),
+            max_base_prewarm_per_tick=int(data.get(
+                "max_base_prewarm_per_tick", defaults.max_base_prewarm_per_tick,
             )),
             retention_days=int(data.get("retention_days", defaults.retention_days)),
             time_of_day=RuleConfig(

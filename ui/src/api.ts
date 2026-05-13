@@ -42,4 +42,28 @@ export const api = {
   revokeKey: (id: number) => jfetch<void>('DELETE', `/admin/keys/${id}`),
   listGpus: () => jfetch<any[]>('GET', '/admin/gpus'),
   loadModel: (b: any) => jfetch<any>('POST', '/admin/deployments', b),
+
+  // Adapters (Sub-project A)
+  listAdapters: () => jfetch<any[]>('GET', '/admin/adapters'),
+  createAdapter: (b: { name: string; base_model_name: string; hf_repo: string; revision?: string }) =>
+    jfetch<any>('POST', '/admin/adapters', b),
+  downloadAdapter: (name: string) => jfetch<any>('POST', `/admin/adapters/${name}/download`),
+  addLocalAdapter: (b: { name: string; base_model_name: string; local_path: string }) =>
+    jfetch<any>('POST', '/admin/adapters/local', b),
+  deleteAdapter: (name: string, force = false) =>
+    jfetch<void>('DELETE', `/admin/adapters/${name}${force ? '?force=true' : ''}`),
+  hotLoadAdapter: (depId: number, name: string) =>
+    jfetch<any>('POST', `/admin/deployments/${depId}/adapters/${name}`),
+  hotUnloadAdapter: (depId: number, name: string) =>
+    jfetch<void>('DELETE', `/admin/deployments/${depId}/adapters/${name}`),
+
+  // Snapshots (Sub-project B)
+  listSnapshots: () => jfetch<any[]>('GET', '/admin/snapshots'),
+  deleteSnapshot: (key: string) => jfetch<void>('DELETE', `/admin/snapshots/${key}`),
+  gcSnapshots: (b: { keep_last_per_model: number; max_disk_gb?: number | null }) =>
+    jfetch<any>('POST', '/admin/snapshots/gc', b),
+
+  // Predictor (Sub-project C)
+  predictorCandidates: () => jfetch<any[]>('GET', '/admin/predictor/candidates'),
+  predictorStats: () => jfetch<any>('GET', '/admin/predictor/stats'),
 }

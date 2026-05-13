@@ -6,6 +6,7 @@ docs/superpowers/specs/2026-05-13-adapter-lifecycle-design.md §4.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import typer
 
@@ -75,6 +76,56 @@ def adapter_pull(
     rank = result.get("lora_rank")
     rank_suffix = f", lora_rank={rank}" if rank is not None else ""
     typer.echo(f"{state}: {result['local_path']} ({result['size_mb']} MB{rank_suffix})")
+    if rank is not None and rank > 16:
+        typer.echo(
+            f"note: adapter has lora_rank={rank}; the target deployment "
+            f"must be started with -x '--max-lora-rank={rank}' (or higher) "
+            f"— vLLM/SGLang default to 16."
+        )
+
+
+@adapter_app.command("add")
+def adapter_add(
+    local_path: str = typer.Argument(
+        ...,
+        help="Directory containing the adapter weights + adapter_config.json",
+    ),
+    base: str = typer.Option(
+        ..., "--base",
+        help="Name of the base model this adapter applies to (must be registered)",
+    ),
+    name: str = typer.Option(
+        None, "--name", "-n",
+        help="Local adapter name (default: basename of local_path)",
+    ),
+):
+    """Register a pre-downloaded LoRA adapter from a local directory.
+
+    Counterpart to `pull` for adapters that aren't on HuggingFace. The
+    directory is copied into the managed cache so the engine container
+    can see it; the source is left untouched.
+    """
+    src = Path(local_path).expanduser().resolve()
+    local_name = name or src.name.lower()
+    body = {
+        "name": local_name,
+        "base_model_name": base,
+        "local_path": str(src),
+    }
+    try:
+        result = asyncio.run(
+            ipc.post(config.SOCK_PATH, "/admin/adapters/local", json=body)
+        )
+    except RuntimeError as e:
+        typer.echo(f"add failed: {e}", err=True)
+        raise typer.Exit(1) from e
+    rank = result.get("lora_rank")
+    rank_suffix = f", lora_rank={rank}" if rank is not None else ""
+    typer.echo(
+        f"registered: {result['name']} (base={result['base']}, "
+        f"{result['size_mb']} MB{rank_suffix})"
+    )
+    typer.echo(f"cached at: {result['local_path']}")
     if rank is not None and rank > 16:
         typer.echo(
             f"note: adapter has lora_rank={rank}; the target deployment "

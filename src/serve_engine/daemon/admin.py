@@ -272,6 +272,12 @@ class CreateAdapterRequest(BaseModel):
     revision: str = "main"
 
 
+class AddLocalAdapterRequest(BaseModel):
+    name: str
+    base_model_name: str
+    local_path: str
+
+
 @router.get("/adapters")
 def list_adapters(conn: sqlite3.Connection = Depends(get_conn)):
     """List registered adapters, including which deployments have each loaded."""
@@ -396,6 +402,90 @@ async def download_adapter_endpoint(
         "name": a.name, "local_path": local_path,
         "size_mb": size_mb, "already_present": False,
         "lora_rank": (meta or {}).get("lora_rank"),
+    }
+
+
+@router.post("/adapters/local", status_code=status.HTTP_201_CREATED)
+def add_local_adapter(
+    body: AddLocalAdapterRequest,
+    manager: LifecycleManager = Depends(get_manager),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Register a pre-downloaded adapter from a local directory.
+
+    Counterpart to `POST /admin/adapters` + `/download`: skips the HF pull
+    and copies a directory the operator already has on disk into the
+    managed cache so the engine container's bind-mount can see it.
+
+    The source directory must contain an `adapter_config.json` with a
+    valid PEFT `r` (LoRA rank); we use that to pre-flight the
+    deployment's `--max-lora-rank` at first hot-load.
+    """
+    import shutil
+
+    from serve_engine.lifecycle.adapter_downloader import parse_adapter_metadata
+
+    src = Path(body.local_path).expanduser().resolve()
+    if not src.is_dir():
+        raise HTTPException(
+            400, f"local_path {body.local_path!r} is not a directory"
+        )
+    meta = parse_adapter_metadata(src)
+    if meta is None or "lora_rank" not in meta:
+        raise HTTPException(
+            400,
+            f"{src}/adapter_config.json missing or has no valid 'r' (LoRA rank)",
+        )
+
+    # Copy into the managed cache so the engine container's /cache bind-mount
+    # picks it up via the existing host→container path translation in
+    # hot_load_adapter.
+    dest_root = manager._models_dir.resolve() / "local-adapters"
+    dest = dest_root / body.name
+    if dest.exists():
+        # The name collision check below would catch this anyway, but if a
+        # prior failed registration left orphaned files we don't want them
+        # silently merged into a new copy.
+        raise HTTPException(
+            409,
+            f"target cache dir already exists: {dest}; "
+            f"remove it manually if the prior add failed midway",
+        )
+
+    try:
+        a = ad_store.add(
+            conn,
+            name=body.name,
+            base_model_name=body.base_model_name,
+            hf_repo=f"local:{src}",
+            revision="local",
+        )
+    except ad_store.NameCollision as e:
+        raise HTTPException(409, str(e)) from e
+    except ad_store.BaseNotFound as e:
+        raise HTTPException(404, str(e)) from e
+
+    try:
+        dest_root.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, dest)
+    except OSError as e:
+        # Rollback the registry row so a half-finished copy can be retried.
+        ad_store.delete(conn, a.id)
+        raise HTTPException(500, f"copy failed: {e}") from e
+
+    size_bytes = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
+    size_mb = int((size_bytes + 1024 * 1024 - 1) // (1024 * 1024))
+
+    ad_store.set_local_path(conn, a.id, str(dest))
+    ad_store.set_size_mb(conn, a.id, size_mb)
+    ad_store.set_lora_rank(conn, a.id, meta["lora_rank"])
+
+    return {
+        "name": a.name,
+        "base": a.base_model.name,
+        "local_path": str(dest),
+        "size_mb": size_mb,
+        "lora_rank": meta["lora_rank"],
     }
 
 
@@ -606,15 +696,22 @@ def predictor_stats(request: Request):
             "preloads_succeeded": 0,
             "preloads_skipped_already_warm": 0,
             "preloads_skipped_no_deployment": 0,
+            "base_prewarms_attempted": 0,
+            "base_prewarms_succeeded": 0,
+            "base_prewarms_skipped_no_plan": 0,
         }
     return {
         "enabled": task._config.enabled,
         "tick_interval_s": task._config.tick_interval_s,
         "max_prewarm_per_tick": task._config.max_prewarm_per_tick,
+        "max_base_prewarm_per_tick": task._config.max_base_prewarm_per_tick,
         "preloads_attempted": task.preloads_attempted,
         "preloads_succeeded": task.preloads_succeeded,
         "preloads_skipped_already_warm": task.preloads_skipped_already_warm,
         "preloads_skipped_no_deployment": task.preloads_skipped_no_deployment,
+        "base_prewarms_attempted": task.base_prewarms_attempted,
+        "base_prewarms_succeeded": task.base_prewarms_succeeded,
+        "base_prewarms_skipped_no_plan": task.base_prewarms_skipped_no_plan,
     }
 
 

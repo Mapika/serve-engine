@@ -72,6 +72,172 @@ def _seed_base_and_deployment(app, *, max_loras: int = 4):
     return base, dep
 
 
+def _write_local_adapter_dir(root, *, rank: int = 8) -> str:
+    """Create a fake on-disk adapter dir with the minimum files vLLM needs."""
+    import json
+    d = root / "src-adapter"
+    d.mkdir()
+    (d / "adapter_config.json").write_text(json.dumps({
+        "r": rank,
+        "target_modules": ["q_proj", "v_proj"],
+        "peft_type": "LORA",
+    }))
+    # vLLM also wants the weights file; a 1-byte placeholder is enough for
+    # the registry path — the engine call is mocked out at the httpx layer.
+    (d / "adapter_model.safetensors").write_bytes(b"\x00")
+    return str(d)
+
+
+@pytest.mark.asyncio
+async def test_add_local_adapter_happy_path(app, tmp_path):
+    _seed_base_and_deployment(app)
+    src = _write_local_adapter_dir(tmp_path, rank=8)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/admin/adapters/local",
+            json={
+                "name": "from-disk",
+                "base_model_name": "qwen3-test",
+                "local_path": src,
+            },
+        )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["name"] == "from-disk"
+    assert body["base"] == "qwen3-test"
+    assert body["lora_rank"] == 8
+    assert body["size_mb"] >= 0
+    # local_path must live under the managed cache so the engine's /cache
+    # bind-mount can resolve it. tmp_path is the models_dir in the fixture.
+    assert body["local_path"].startswith(str(tmp_path / "local-adapters"))
+    # Registry row reflects all three setters fired.
+    a = ad_store.get_by_name(app.state.conn, "from-disk")
+    assert a is not None
+    assert a.local_path == body["local_path"]
+    assert a.lora_rank == 8
+    assert a.hf_repo.startswith("local:")
+    assert a.revision == "local"
+
+
+@pytest.mark.asyncio
+async def test_add_local_adapter_rejects_missing_dir(app, tmp_path):
+    _seed_base_and_deployment(app)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/admin/adapters/local",
+            json={
+                "name": "x", "base_model_name": "qwen3-test",
+                "local_path": str(tmp_path / "does-not-exist"),
+            },
+        )
+    assert r.status_code == 400
+    assert "not a directory" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_add_local_adapter_rejects_missing_config(app, tmp_path):
+    _seed_base_and_deployment(app)
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    (bare / "random.bin").write_bytes(b"\x00")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/admin/adapters/local",
+            json={
+                "name": "x", "base_model_name": "qwen3-test",
+                "local_path": str(bare),
+            },
+        )
+    assert r.status_code == 400
+    assert "adapter_config.json" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_add_local_adapter_rejects_invalid_rank(app, tmp_path):
+    """adapter_config.json with no `r` (or non-positive) is refused so the
+    rank pre-flight at hot-load time doesn't get a free pass."""
+    import json as _json
+    _seed_base_and_deployment(app)
+    d = tmp_path / "no-rank"
+    d.mkdir()
+    (d / "adapter_config.json").write_text(_json.dumps({"peft_type": "LORA"}))
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/admin/adapters/local",
+            json={
+                "name": "x", "base_model_name": "qwen3-test",
+                "local_path": str(d),
+            },
+        )
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_add_local_adapter_name_collision_409(app, tmp_path):
+    _seed_base_and_deployment(app)
+    src = _write_local_adapter_dir(tmp_path)
+    # Pre-existing registry row with same name (via HF path).
+    ad_store.add(
+        app.state.conn, name="dup", base_model_name="qwen3-test", hf_repo="o/x",
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/admin/adapters/local",
+            json={
+                "name": "dup", "base_model_name": "qwen3-test",
+                "local_path": src,
+            },
+        )
+    assert r.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_add_local_adapter_unknown_base_404(app, tmp_path):
+    src = _write_local_adapter_dir(tmp_path)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/admin/adapters/local",
+            json={
+                "name": "x", "base_model_name": "no-such-base",
+                "local_path": src,
+            },
+        )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_add_local_adapter_rolls_back_on_copy_failure(app, tmp_path, monkeypatch):
+    """If shutil.copytree fails after the registry row is inserted, the row
+    must be deleted so a retry isn't blocked by a name collision."""
+    import shutil
+
+    _seed_base_and_deployment(app)
+    src = _write_local_adapter_dir(tmp_path)
+
+    def boom(*a, **kw):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(shutil, "copytree", boom)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/admin/adapters/local",
+            json={
+                "name": "rollback-me", "base_model_name": "qwen3-test",
+                "local_path": src,
+            },
+        )
+    assert r.status_code == 500
+    assert ad_store.get_by_name(app.state.conn, "rollback-me") is None
+
+
 @pytest.mark.asyncio
 async def test_create_adapter_happy_path(app):
     _seed_base_and_deployment(app)

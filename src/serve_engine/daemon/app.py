@@ -98,6 +98,7 @@ def build_apps(
         backends=backends,
         models_dir=models_dir,
         config=predictor_cfg,
+        manager=manager,
     )
     # Daily rollup: events older than predictor_cfg.retention_days get
     # aggregated into usage_aggregates and removed from usage_events.

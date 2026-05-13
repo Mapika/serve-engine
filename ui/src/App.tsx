@@ -3,15 +3,29 @@ import TokenGate from './components/TokenGate'
 import { clearToken } from './api'
 import Dashboard from './views/Dashboard'
 import Models from './views/Models'
+import Adapters from './views/Adapters'
+import Snapshots from './views/Snapshots'
+import Predictor from './views/Predictor'
 import Playground from './views/Playground'
 import Keys from './views/Keys'
 import Logs from './views/Logs'
 
-type View = 'dashboard' | 'models' | 'playground' | 'keys' | 'logs'
+type View =
+  | 'dashboard'
+  | 'models'
+  | 'adapters'
+  | 'snapshots'
+  | 'predictor'
+  | 'playground'
+  | 'keys'
+  | 'logs'
 
 const VIEWS: { id: View; label: string }[] = [
   { id: 'dashboard', label: 'dashboard' },
   { id: 'models', label: 'models' },
+  { id: 'adapters', label: 'adapters' },
+  { id: 'snapshots', label: 'snapshots' },
+  { id: 'predictor', label: 'predictor' },
   { id: 'playground', label: 'playground' },
   { id: 'keys', label: 'keys' },
   { id: 'logs', label: 'logs' },
@@ -64,6 +78,9 @@ export default function App() {
           <div key={view} className="max-w-[1280px] mx-auto px-8 py-12 enter">
             {view === 'dashboard' && <Dashboard />}
             {view === 'models' && <Models />}
+            {view === 'adapters' && <Adapters />}
+            {view === 'snapshots' && <Snapshots />}
+            {view === 'predictor' && <Predictor />}
             {view === 'playground' && <Playground />}
             {view === 'keys' && <Keys />}
             {view === 'logs' && <Logs />}

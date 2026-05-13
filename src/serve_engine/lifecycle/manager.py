@@ -27,6 +27,7 @@ from serve_engine.lifecycle.placement import (
 from serve_engine.lifecycle.plan import DeploymentPlan
 from serve_engine.lifecycle.topology import Topology
 from serve_engine.observability.events import Event, EventBus
+from serve_engine.store import deployment_plans as plan_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
 from serve_engine.store import snapshots as snapshot_store
@@ -212,6 +213,14 @@ class LifecycleManager:
                 max_loras=plan.max_loras,
                 max_lora_rank=plan.max_lora_rank,
             )
+            # Sub-project C base-pre-warming history. Capture the operator's
+            # plan as JSON before the long health-check window so a daemon
+            # crash mid-load doesn't lose it. `reached_ready_at` stays NULL
+            # until the engine's healthz answers — failed loads must not
+            # tempt the predictor into replaying a bad config.
+            plan_record_id = plan_store.record(
+                self._conn, model_id=model.id, plan=plan, deployment_id=dep.id,
+            )
             dep_store.update_status(self._conn, dep.id, "loading")
             await self._emit(
                 "deployment.loading",
@@ -323,6 +332,7 @@ class LifecycleManager:
                 raise RuntimeError(msg)
 
             dep_store.update_status(self._conn, dep.id, "ready")
+            plan_store.mark_ready(self._conn, plan_record_id)
             await self._emit("deployment.ready", dep_id=dep.id)
 
             # Snapshot bookkeeping. On HIT we just bump last_used_at; on

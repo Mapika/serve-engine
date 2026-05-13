@@ -7,6 +7,7 @@ max_prewarm_per_tick cap.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -323,3 +324,197 @@ async def test_tick_disabled_predictor_is_noop(tmp_path, monkeypatch):
     )
     assert await task.tick_once() == 0
     assert cap == []
+
+
+# ---- Base pre-warming (Sub-project C follow-up) ----------------------------
+
+from unittest.mock import AsyncMock  # noqa: E402
+
+from serve_engine.lifecycle.plan import DeploymentPlan  # noqa: E402
+from serve_engine.store import deployment_plans as plan_store  # noqa: E402
+
+
+def _seed_plan(conn, base_name: str, *, max_loras: int = 4) -> int:
+    """Insert a model row + a recorded successful plan for it; return plan id."""
+    base = model_store.add(conn, name=base_name, hf_repo=f"o/{base_name}")
+    plan = DeploymentPlan(
+        model_name=base_name, hf_repo=f"o/{base_name}", revision="main",
+        backend="vllm", image_tag="vllm:test", gpu_ids=[0],
+        max_model_len=4096, tensor_parallel=1, dtype="auto",
+        max_loras=max_loras, max_lora_rank=32,
+    )
+    pid = plan_store.record(conn, model_id=base.id, plan=plan)
+    plan_store.mark_ready(conn, pid)
+    return pid
+
+
+@pytest.mark.asyncio
+async def test_base_prewarm_fires_for_bare_base_candidate_with_history(
+    tmp_path,
+):
+    """Sequencing produces a bare-base candidate; the tick reconstructs the
+    plan from history and calls manager.load. No engine HTTP intercept
+    needed — manager is mocked, so the load is a single coroutine call."""
+    conn = _fresh(tmp_path)
+    _seed_plan(conn, "qwen3-7b")
+    # Sequencing history: another-base → qwen3-7b (bare).
+    now = datetime.now(UTC).replace(tzinfo=None)
+    for i in range(5):
+        x_ts = now - timedelta(hours=1) - timedelta(minutes=i)
+        conn.execute(
+            "INSERT INTO usage_events (ts, model_name, base_name, adapter_name) "
+            "VALUES (?, 'another-base', 'another-base', NULL)",
+            (x_ts.strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+        conn.execute(
+            "INSERT INTO usage_events (ts, model_name, base_name, adapter_name) "
+            "VALUES (?, 'qwen3-7b', 'qwen3-7b', NULL)",
+            ((x_ts + timedelta(seconds=10)).strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+    _seed_recent_event(conn, "another-base")
+
+    manager = AsyncMock()
+    manager.load = AsyncMock()
+    task = PredictorTask(
+        conn=conn, backends={"vllm": VLLMBackend()},
+        models_dir=tmp_path, config=_only_seq(), manager=manager,
+    )
+    await task.tick_once()
+    # The base pre-warm is launched as a background task; await one event
+    # loop turn so the fire-and-forget coroutine actually runs.
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert task.base_prewarms_attempted == 1
+    assert task.base_prewarms_succeeded == 1
+    assert manager.load.call_count == 1
+    submitted = manager.load.call_args[0][0]
+    assert submitted.model_name == "qwen3-7b"
+    assert submitted.max_loras == 4
+
+
+@pytest.mark.asyncio
+async def test_base_prewarm_skips_when_no_history(tmp_path):
+    """Predictor surfaces a bare-base candidate but the model has never
+    been loaded successfully. Skip + bump the no_plan counter so the
+    operator can see why nothing happened."""
+    conn = _fresh(tmp_path)
+    # Register the model but record NO plan.
+    model_store.add(conn, name="qwen3-7b", hf_repo="o/qwen3-7b")
+    now = datetime.now(UTC).replace(tzinfo=None)
+    for i in range(5):
+        x_ts = now - timedelta(hours=1) - timedelta(minutes=i)
+        conn.execute(
+            "INSERT INTO usage_events (ts, model_name, base_name, adapter_name) "
+            "VALUES (?, 'another-base', 'another-base', NULL)",
+            (x_ts.strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+        conn.execute(
+            "INSERT INTO usage_events (ts, model_name, base_name, adapter_name) "
+            "VALUES (?, 'qwen3-7b', 'qwen3-7b', NULL)",
+            ((x_ts + timedelta(seconds=10)).strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+    _seed_recent_event(conn, "another-base")
+
+    manager = AsyncMock()
+    manager.load = AsyncMock()
+    task = PredictorTask(
+        conn=conn, backends={"vllm": VLLMBackend()},
+        models_dir=tmp_path, config=_only_seq(), manager=manager,
+    )
+    await task.tick_once()
+    await asyncio.sleep(0)
+
+    assert task.base_prewarms_attempted == 0
+    assert task.base_prewarms_skipped_no_plan == 1
+    assert manager.load.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_base_prewarm_skips_when_deployment_already_ready(tmp_path):
+    """The base is already serving. Don't spin up a duplicate — the
+    predictor sees the bare-base candidate but the ready deployment
+    short-circuits the path."""
+    conn = _fresh(tmp_path)
+    base, _ = _seed_deployment(conn, "qwen3-7b")
+    # Record a plan against the *existing* model row so we don't double-
+    # insert. The plan is still queryable; the predictor should ignore it
+    # because the deployment is already ready.
+    plan = DeploymentPlan(
+        model_name="qwen3-7b", hf_repo="o/qwen3-7b", revision="main",
+        backend="vllm", image_tag="vllm:test", gpu_ids=[0],
+        max_model_len=4096, tensor_parallel=1, dtype="auto", max_loras=4,
+    )
+    pid = plan_store.record(conn, model_id=base.id, plan=plan)
+    plan_store.mark_ready(conn, pid)
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    for i in range(5):
+        x_ts = now - timedelta(hours=1) - timedelta(minutes=i)
+        conn.execute(
+            "INSERT INTO usage_events (ts, model_name, base_name, adapter_name) "
+            "VALUES (?, 'another-base', 'another-base', NULL)",
+            (x_ts.strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+        conn.execute(
+            "INSERT INTO usage_events (ts, model_name, base_name, adapter_name) "
+            "VALUES (?, 'qwen3-7b', 'qwen3-7b', NULL)",
+            ((x_ts + timedelta(seconds=10)).strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+    _seed_recent_event(conn, "another-base")
+
+    manager = AsyncMock()
+    manager.load = AsyncMock()
+    task = PredictorTask(
+        conn=conn, backends={"vllm": VLLMBackend()},
+        models_dir=tmp_path, config=_only_seq(), manager=manager,
+    )
+    await task.tick_once()
+    await asyncio.sleep(0)
+
+    assert manager.load.call_count == 0
+    # Counter doesn't bump for "already-ready" — that's a happy outcome,
+    # not a missing-plan miss. The skipped_no_plan counter must stay 0
+    # so operators distinguish "predictor is doing nothing" from "the
+    # base is up and predictor correctly noticed".
+    assert task.base_prewarms_skipped_no_plan == 0
+
+
+@pytest.mark.asyncio
+async def test_base_prewarm_respects_zero_budget(tmp_path):
+    """max_base_prewarm_per_tick=0 disables base pre-warming entirely —
+    operator opts out via predictor.yaml."""
+    conn = _fresh(tmp_path)
+    _seed_plan(conn, "qwen3-7b")
+    now = datetime.now(UTC).replace(tzinfo=None)
+    for i in range(5):
+        x_ts = now - timedelta(hours=1) - timedelta(minutes=i)
+        conn.execute(
+            "INSERT INTO usage_events (ts, model_name, base_name, adapter_name) "
+            "VALUES (?, 'another-base', 'another-base', NULL)",
+            (x_ts.strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+        conn.execute(
+            "INSERT INTO usage_events (ts, model_name, base_name, adapter_name) "
+            "VALUES (?, 'qwen3-7b', 'qwen3-7b', NULL)",
+            ((x_ts + timedelta(seconds=10)).strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+    _seed_recent_event(conn, "another-base")
+
+    cfg = PredictorConfig(
+        max_base_prewarm_per_tick=0,
+        time_of_day=RuleConfig(enabled=False),
+        sequencing=SequencingConfig(window_s=30, min_p=0.30),
+        key_affinity=KeyAffinityConfig(enabled=False),
+    )
+    manager = AsyncMock()
+    manager.load = AsyncMock()
+    task = PredictorTask(
+        conn=conn, backends={"vllm": VLLMBackend()},
+        models_dir=tmp_path, config=cfg, manager=manager,
+    )
+    await task.tick_once()
+    await asyncio.sleep(0)
+
+    assert manager.load.call_count == 0
+    assert task.base_prewarms_attempted == 0
