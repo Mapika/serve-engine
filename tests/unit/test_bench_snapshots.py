@@ -97,6 +97,35 @@ async def test_one_run_against_fake_daemon(tmp_path):
     assert result.total_s >= result.ready_s + result.ttft_s - 0.001  # rounding
 
 
+@pytest.mark.asyncio
+async def test_benchmark_runs_cold_then_warm(tmp_path):
+    """Cold runs delete the snapshot dir first; warm runs do not.
+    benchmark() returns two lists of RunResult."""
+    from scripts.bench_snapshots import benchmark
+
+    snapshots_dir = tmp_path / "snapshots"
+    snapshots_dir.mkdir()
+    fake_snapshot = snapshots_dir / "abc123"
+    fake_snapshot.mkdir()
+    (fake_snapshot / "marker").write_text("present")
+
+    async with fake_daemon(tmp_path) as sock:
+        result = await benchmark(
+            sock=sock,
+            model_name="test-model",
+            hf_repo="test/m",
+            gpu_id=0,
+            runs=2,
+            snapshots_dir=snapshots_dir,
+            poll_interval_s=0.01,
+            snapshot_save_timeout_s=0.5,
+        )
+    assert len(result["cold"]) == 2
+    assert len(result["warm"]) == 2
+    assert all(r.ok for r in result["cold"]), [r.error for r in result["cold"]]
+    assert all(r.ok for r in result["warm"]), [r.error for r in result["warm"]]
+
+
 def test_gpu_fingerprint_parses_nvidia_smi():
     fake_output = "NVIDIA H100 80GB HBM3, 550.54.15, 81559 MiB\n"
     with patch("scripts.bench_snapshots.subprocess.check_output", return_value=fake_output):

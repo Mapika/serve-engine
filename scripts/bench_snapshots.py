@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import shutil
 import statistics
 import subprocess
 import sys
@@ -221,6 +222,79 @@ async def one_run(
         )
     except Exception as e:
         return RunResult(ready_s=0.0, ttft_s=0.0, total_s=0.0, ok=False, error=str(e))
+
+
+def _purge_snapshots(snapshots_dir: Path) -> None:
+    """Delete all snapshot directories. Used before each cold run.
+    We delete the whole dir contents rather than guessing snapshot_keys
+    because the key is content-addressable on the deployment config —
+    simpler and equivalent for the bench's purposes."""
+    if not snapshots_dir.is_dir():
+        return
+    for child in snapshots_dir.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            child.unlink(missing_ok=True)
+
+
+async def _wait_for_snapshot_save(snapshots_dir: Path, timeout_s: float = 120.0) -> bool:
+    """Snapshot save is async (manager schedules it post-deployment).
+    Poll for any non-empty subdir under snapshots_dir. Returns True if
+    a snapshot appears within timeout_s, False otherwise (failure is
+    not fatal; warm runs will then be effectively cold)."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if snapshots_dir.is_dir():
+            for child in snapshots_dir.iterdir():
+                if child.is_dir() and any(child.iterdir()):
+                    return True
+        await asyncio.sleep(1.0)
+    return False
+
+
+async def benchmark(
+    *,
+    sock: Path,
+    model_name: str,
+    hf_repo: str,
+    gpu_id: int,
+    runs: int,
+    snapshots_dir: Path,
+    poll_interval_s: float = 1.0,
+    snapshot_save_timeout_s: float = 120.0,
+) -> dict[str, list[RunResult]]:
+    """Run `runs` cold passes then `runs` warm passes. Returns both lists."""
+    client = AdminClient(sock)
+
+    cold: list[RunResult] = []
+    for i in range(runs):
+        _purge_snapshots(snapshots_dir)
+        r = await one_run(
+            client,
+            model_name=model_name,
+            hf_repo=hf_repo,
+            gpu_id=gpu_id,
+            poll_interval_s=poll_interval_s,
+        )
+        cold.append(r)
+        # Give the daemon time to persist the snapshot before the next cold run
+        # purges it. (Last cold run's snapshot is what warm runs consume.)
+        if r.ok and i == runs - 1:
+            await _wait_for_snapshot_save(snapshots_dir, snapshot_save_timeout_s)
+
+    warm: list[RunResult] = []
+    for _ in range(runs):
+        r = await one_run(
+            client,
+            model_name=model_name,
+            hf_repo=hf_repo,
+            gpu_id=gpu_id,
+            poll_interval_s=poll_interval_s,
+        )
+        warm.append(r)
+
+    return {"cold": cold, "warm": warm}
 
 
 def main() -> int:
