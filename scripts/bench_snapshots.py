@@ -90,7 +90,7 @@ def aggregate(runs: list[RunResult]) -> dict[str, Any]:
 def to_markdown(cold: dict[str, Any], warm: dict[str, Any]) -> str:
     """Produce the README-pasteable markdown table from two aggregates."""
     def speedup(c: float, w: float) -> str:
-        return f"{c / w:.1f}×" if w > 0 else "n/a"
+        return f"{c / w:.1f}x" if w > 0 else "n/a"
 
     rows = [
         ("Engine ready", cold["ready"]["median"], warm["ready"]["median"]),
@@ -299,16 +299,86 @@ async def benchmark(
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--model", default="Qwen/Qwen2.5-1.5B-Instruct")
+    p.add_argument(
+        "--model", default="Qwen/Qwen2.5-1.5B-Instruct",
+        help="HF repo id; also used as the registered model name (with / → -).",
+    )
     p.add_argument("--runs", type=int, default=5)
-    p.add_argument("--output", type=Path, default=Path("docs/bench/snapshot-cold-vs-warm.json"))
+    p.add_argument(
+        "--output", type=Path,
+        default=Path("docs/bench/snapshot-cold-vs-warm.json"),
+    )
     p.add_argument("--sock", type=Path, default=Path.home() / ".serve" / "sock")
+    p.add_argument(
+        "--snapshots-dir", type=Path,
+        default=Path.home() / ".serve" / "snapshots",
+    )
     p.add_argument("--gpu-id", type=int, default=0)
     args = p.parse_args()
 
-    # Round-trip orchestration lands in Task 2-3. Skeleton just prints args + fingerprint.
-    print(f"Would run {args.runs} cold + {args.runs} warm against {args.model} on GPU {args.gpu_id}")
+    if not args.sock.exists():
+        print(
+            f"error: daemon socket not found at {args.sock} — is the daemon running?",
+            file=sys.stderr,
+        )
+        return 2
+
+    model_name = args.model.split("/")[-1].lower()
+    hf_repo = args.model
+
+    print(f"Running {args.runs} cold + {args.runs} warm passes for {hf_repo}")
     print(f"GPU: {gpu_fingerprint()}")
+
+    result = asyncio.run(benchmark(
+        sock=args.sock,
+        model_name=model_name,
+        hf_repo=hf_repo,
+        gpu_id=args.gpu_id,
+        runs=args.runs,
+        snapshots_dir=args.snapshots_dir,
+    ))
+
+    cold_agg = aggregate(result["cold"])
+    warm_agg = aggregate(result["warm"])
+
+    table = to_markdown(cold_agg, warm_agg)
+    print("\n" + table + "\n")
+
+    git_sha = "unknown"
+    try:
+        git_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True,
+        ).strip()
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+
+    payload = {
+        "model": hf_repo,
+        "engine": "vllm",
+        "runs": args.runs,
+        "hardware": gpu_fingerprint(),
+        "serve_engine_git_sha": git_sha,
+        "cold": {
+            "runs": [asdict(r) for r in result["cold"]],
+            "aggregate": cold_agg,
+        },
+        "warm": {
+            "runs": [asdict(r) for r in result["warm"]],
+            "aggregate": warm_agg,
+        },
+    }
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(payload, indent=2))
+    print(f"Wrote {args.output}")
+
+    # Non-zero exit if too many runs failed — caller can gate launch on this.
+    if (
+        cold_agg["n_failed"] > args.runs // 2
+        or warm_agg["n_failed"] > args.runs // 2
+    ):
+        print("FAILED: majority of runs errored", file=sys.stderr)
+        return 1
     return 0
 
 

@@ -116,7 +116,7 @@ async def one_request(
                 usage = obj.get("usage")
                 if usage:
                     tokens_seen = int(usage.get("completion_tokens", tokens_seen))
-    except (httpx.HTTPError, asyncio.TimeoutError):
+    except (httpx.HTTPError, TimeoutError):
         return RequestResult(0, 0, 0, failed=True)
 
     t_end = time.monotonic()
@@ -211,7 +211,7 @@ async def measure_qps(
 def pct(xs: list[float], p: float) -> float:
     if not xs:
         return 0.0
-    k = max(0, min(len(xs) - 1, int(round((p / 100) * (len(xs) - 1)))))
+    k = max(0, min(len(xs) - 1, round((p / 100) * (len(xs) - 1))))
     return xs[k]
 
 
