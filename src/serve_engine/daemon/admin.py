@@ -165,7 +165,14 @@ async def create_deployment(
             f"backend {backend_name!r} does not support LoRA adapters; "
             f"`max_loras` must be 0 (got {plan.max_loras})",
         )
-    dep = await manager.load(plan)
+    try:
+        dep = await manager.load(plan)
+    except RuntimeError as e:
+        # manager.load raises RuntimeError for client-actionable load
+        # failures: a same-name deployment is pinned, or placement found
+        # no room. Surface as 409 so the CLI's IPC layer extracts the
+        # message instead of showing a bare 500.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
     return {**asdict(dep), "gpu_ids": dep.gpu_ids}
 
 

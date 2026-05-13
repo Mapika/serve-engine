@@ -51,7 +51,8 @@ def run(
              "adapters disabled. Adapters loaded later via `serve adapter load`.",
     ),
 ):
-    """Load a model and make it active. Stops the current model first."""
+    """Load a model and make it active. Replaces any existing deployment
+    of the same name (errors if that deployment is pinned)."""
     gpu_ids = [int(g) for g in gpu.split(",") if g.strip()]
     extra_args: dict[str, str] = {}
     for raw in extra:

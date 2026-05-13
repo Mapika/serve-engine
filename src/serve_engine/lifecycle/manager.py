@@ -125,7 +125,27 @@ class LifecycleManager:
                 dtype=plan.dtype,
             ))
 
-            # 4. Placement
+            # 4. Replace any prior ready deployment of this same model name.
+            # CLI contract ("Stops the current model first"): `serve run X`
+            # supersedes the existing X. Pinned deployments are excluded
+            # from the replace — pin is the operator's commitment that the
+            # deployment is special; replacing requires an explicit
+            # `serve unpin` first. Doing the cutover after weight prep but
+            # before placement keeps the old container live during any HF
+            # download and frees its VRAM so placement can reuse the GPU.
+            priors = [
+                d for d in dep_store.list_ready(self._conn) if d.model_id == model.id
+            ]
+            for prior in priors:
+                if prior.pinned:
+                    raise RuntimeError(
+                        f"deployment #{prior.id} for {plan.model_name!r} is pinned; "
+                        f"run `serve unpin {plan.model_name}` before replacing it"
+                    )
+            for prior in priors:
+                await self._stop_locked(prior.id)
+
+            # 5. Placement
             if self._topology is None:
                 raise RuntimeError(
                     "topology not initialized; "

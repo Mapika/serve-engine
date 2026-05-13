@@ -98,7 +98,45 @@ def test_load_evicts_previous_when_room_constrained(conn, monkeypatch, tmp_path,
     docker_client.stop.assert_called_once_with("cid1", timeout=30)
 
 
+def test_load_stops_prior_deployment_of_same_name(conn, monkeypatch, tmp_path, topo_one_gpu):
+    """`serve run X` must stop any existing ready deployment named X before
+    starting the new one — that's the CLI contract ("Stops the current
+    model first"). Without this, two co-located deployments of the same
+    base name burn extra VRAM and the proxy's find_ready_by_model_name
+    routes to whichever has the newer started_at, masking config drift
+    between the two engine processes.
+    """
+    docker_client = MagicMock()
+    docker_client.run.side_effect = [
+        ContainerHandle(id="cid1", name="x1", address="127.0.0.1", port=49152),
+        ContainerHandle(id="cid2", name="x2", address="127.0.0.1", port=49153),
+    ]
+    # Small VRAM per deployment so both would fit on the 80 GB GPU under the
+    # current placement logic — placement will NOT evict on its own here.
+    _patch_externals(monkeypatch, tmp_path, vram_mb=10_000)
+
+    mgr = LifecycleManager(
+        conn=conn, docker_client=docker_client,
+        backends={"vllm": VLLMBackend()}, models_dir=tmp_path,
+        topology=topo_one_gpu,
+    )
+    model_store.add(conn, name="llama-1b", hf_repo="meta-llama/Llama-3.2-1B-Instruct")
+    dep1 = asyncio.run(mgr.load(_make_plan()))
+    dep2 = asyncio.run(mgr.load(_make_plan()))
+
+    # Invariant: at most one ready deployment per model_name. dep1 was
+    # superseded by dep2 and must be in 'stopped' status with its container
+    # torn down.
+    assert dep_store.get_by_id(conn, dep1.id).status == "stopped"
+    assert dep_store.get_by_id(conn, dep2.id).status == "ready"
+    docker_client.stop.assert_any_call("cid1", timeout=30)
+
+
 def test_pin_prevents_eviction(conn, monkeypatch, tmp_path, topo_one_gpu):
+    """Pinned deployments are not LRU-evicted to make room for a different
+    model. The second load is for a *different* model so the same-name
+    replacement path doesn't apply — this test is purely about placement.
+    """
     docker_client = MagicMock()
     docker_client.run.return_value = ContainerHandle(
         id="cid1", name="x1", address="127.0.0.1", port=49152,
@@ -113,10 +151,37 @@ def test_pin_prevents_eviction(conn, monkeypatch, tmp_path, topo_one_gpu):
     plan_pinned = replace(_make_plan(), pinned=True)
     model_store.add(conn, name="llama-1b", hf_repo="meta-llama/Llama-3.2-1B-Instruct")
     asyncio.run(mgr.load(plan_pinned))
-    # Loading another deployment that needs the same room must fail
-    plan2 = _make_plan()
+    # Different model that won't fit alongside the pinned one and can't
+    # evict it.
+    model_store.add(conn, name="other-model", hf_repo="org/other")
+    plan2 = replace(_make_plan(), model_name="other-model", hf_repo="org/other")
     with pytest.raises(RuntimeError, match="cannot place"):
         asyncio.run(mgr.load(plan2))
+
+
+def test_load_refuses_to_replace_pinned_same_name(conn, monkeypatch, tmp_path, topo_one_gpu):
+    """`serve run X` on a pinned X errors with a clear message instead of
+    silently replacing — pin is the operator's commitment that the
+    deployment is special. They must `serve unpin X` first.
+    """
+    docker_client = MagicMock()
+    docker_client.run.return_value = ContainerHandle(
+        id="cid1", name="x1", address="127.0.0.1", port=49152,
+    )
+    _patch_externals(monkeypatch, tmp_path, vram_mb=10_000)
+
+    mgr = LifecycleManager(
+        conn=conn, docker_client=docker_client,
+        backends={"vllm": VLLMBackend()}, models_dir=tmp_path,
+        topology=topo_one_gpu,
+    )
+    model_store.add(conn, name="llama-1b", hf_repo="meta-llama/Llama-3.2-1B-Instruct")
+    asyncio.run(mgr.load(replace(_make_plan(), pinned=True)))
+
+    with pytest.raises(RuntimeError, match="is pinned; run `serve unpin"):
+        asyncio.run(mgr.load(_make_plan()))
+    # Critical: the pinned deployment is still ready and intact.
+    docker_client.stop.assert_not_called()
 
 
 def test_load_marks_failed_on_unhealthy(conn, monkeypatch, tmp_path, topo_one_gpu):
