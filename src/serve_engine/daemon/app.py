@@ -91,6 +91,7 @@ def build_apps(
     # using the rule-based scorer over usage_events. Reads
     # ~/.serve/predictor.yaml each ctor — operators tune via that file.
     from serve_engine.lifecycle.predictor import PredictorConfig
+    from serve_engine.lifecycle.usage_rollup_task import UsageRollupTask
     predictor_cfg = PredictorConfig.load(_cfg.SERVE_DIR / "predictor.yaml")
     predictor_task = PredictorTask(
         conn=conn,
@@ -98,6 +99,10 @@ def build_apps(
         models_dir=models_dir,
         config=predictor_cfg,
     )
+    # Daily rollup: events older than predictor_cfg.retention_days get
+    # aggregated into usage_aggregates and removed from usage_events.
+    # Keeps the predictor's hot table bounded for long-running boxes.
+    rollup_task = UsageRollupTask(conn=conn, config=predictor_cfg)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -120,8 +125,10 @@ def build_apps(
         reaper.start()
         snapshot_gc.start()
         predictor_task.start()
+        rollup_task.start()
         yield
         # Shutdown
+        await rollup_task.stop()
         await predictor_task.stop()
         await snapshot_gc.stop()
         await reaper.stop()
