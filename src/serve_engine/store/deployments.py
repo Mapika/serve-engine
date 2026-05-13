@@ -29,6 +29,7 @@ class Deployment:
     vram_reserved_mb: int
     last_request_at: str | None
     max_loras: int = 0  # 0 = LoRA disabled (Sub-project A v2)
+    max_lora_rank: int = 0  # 0 = unset; treat as engine default (16)
 
 
 def _row_to_dep(row: sqlite3.Row) -> Deployment:
@@ -40,6 +41,10 @@ def _row_to_dep(row: sqlite3.Row) -> Deployment:
         max_loras_value = row["max_loras"]
     except (KeyError, IndexError):
         max_loras_value = 0
+    try:
+        max_lora_rank_value = row["max_lora_rank"]
+    except (KeyError, IndexError):
+        max_lora_rank_value = 0
     return Deployment(
         id=row["id"],
         model_id=row["model_id"],
@@ -60,6 +65,7 @@ def _row_to_dep(row: sqlite3.Row) -> Deployment:
         vram_reserved_mb=row["vram_reserved_mb"],
         last_request_at=row["last_request_at"],
         max_loras=max_loras_value or 0,
+        max_lora_rank=max_lora_rank_value or 0,
     )
 
 
@@ -77,6 +83,7 @@ def create(
     idle_timeout_s: int | None = None,
     vram_reserved_mb: int = 0,
     max_loras: int = 0,
+    max_lora_rank: int = 0,
 ) -> Deployment:
     gpu_csv = ",".join(str(g) for g in gpu_ids)
     cur = conn.execute(
@@ -84,14 +91,14 @@ def create(
         INSERT INTO deployments
             (model_id, backend, image_tag, gpu_ids, tensor_parallel,
              max_model_len, dtype, pinned, idle_timeout_s, vram_reserved_mb,
-             max_loras)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             max_loras, max_lora_rank)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             model_id, backend, image_tag, gpu_csv, tensor_parallel,
             max_model_len, dtype,
             1 if pinned else 0, idle_timeout_s, vram_reserved_mb,
-            max_loras,
+            max_loras, max_lora_rank,
         ),
     )
     result = get_by_id(conn, cur.lastrowid)

@@ -126,6 +126,118 @@ def _make_engine_intercept(monkeypatch, app):
     return captured
 
 
+def _seed_with_rank(app, *, deployment_max_lora_rank: int):
+    """Like _seed() but sets the deployment's max_lora_rank — what the
+    operator would have passed via -x '--max-lora-rank=N'."""
+    conn = app.state.conn
+    base = model_store.add(conn, name="qwen3-test", hf_repo="o/qwen3")
+    dep = dep_store.create(
+        conn, model_id=base.id, backend="vllm", image_tag="vllm:test",
+        gpu_ids=[0], tensor_parallel=1, max_model_len=4096, dtype="auto",
+        max_loras=4, max_lora_rank=deployment_max_lora_rank,
+    )
+    dep_store.set_container(
+        conn, dep.id, container_id="cid", container_name="x",
+        container_port=49152, container_address="127.0.0.1",
+    )
+    dep_store.update_status(conn, dep.id, "ready")
+    return base, dep
+
+
+@pytest.mark.asyncio
+async def test_proxy_rejects_adapter_exceeding_deployment_max_lora_rank(
+    app, monkeypatch, tmp_path,
+):
+    """When the adapter's lora_rank exceeds the deployment's max_lora_rank,
+    the proxy must fail fast with an actionable message instead of letting
+    the engine produce a cryptic 500 on /v1/load_lora_adapter. The engine
+    load endpoint must NOT be called.
+    """
+    _, _ = _seed_with_rank(app, deployment_max_lora_rank=16)
+    a = ad_store.add(
+        app.state.conn, name="big-lora", base_model_name="qwen3-test",
+        hf_repo="o/big-lora",
+    )
+    adir = tmp_path / "snap"
+    adir.mkdir()
+    ad_store.set_local_path(app.state.conn, a.id, str(adir))
+    ad_store.set_lora_rank(app.state.conn, a.id, 64)
+
+    cap = _make_engine_intercept(monkeypatch, app)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/v1/chat/completions",
+            json={"model": "big-lora", "messages": [{"role": "user", "content": "hi"}]},
+        )
+    assert r.status_code >= 400
+    body = r.json()
+    assert "lora_rank" in body["detail"] or "max-lora-rank" in body["detail"]
+    assert "64" in body["detail"]
+    assert "16" in body["detail"]
+    # Engine was never asked to load the adapter.
+    assert cap["loads"] == []
+
+
+@pytest.mark.asyncio
+async def test_proxy_rejects_adapter_exceeding_default_engine_rank(
+    app, monkeypatch, tmp_path,
+):
+    """If the operator didn't pass --max-lora-rank (deployment.max_lora_rank=0),
+    we fall back to the engine default of 16. An adapter with r=64 must
+    still be caught before hitting the engine."""
+    _, _ = _seed_with_rank(app, deployment_max_lora_rank=0)  # operator didn't set
+    a = ad_store.add(
+        app.state.conn, name="big-lora", base_model_name="qwen3-test",
+        hf_repo="o/big-lora",
+    )
+    adir = tmp_path / "snap"
+    adir.mkdir()
+    ad_store.set_local_path(app.state.conn, a.id, str(adir))
+    ad_store.set_lora_rank(app.state.conn, a.id, 64)
+
+    cap = _make_engine_intercept(monkeypatch, app)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/v1/chat/completions",
+            json={"model": "big-lora", "messages": [{"role": "user", "content": "hi"}]},
+        )
+    assert r.status_code >= 400
+    assert cap["loads"] == []
+
+
+@pytest.mark.asyncio
+async def test_proxy_allows_adapter_within_max_lora_rank(
+    app, monkeypatch, tmp_path,
+):
+    """Compatible adapter (rank <= deployment's max_lora_rank) loads
+    normally — this is the regression check that the pre-flight doesn't
+    over-trigger."""
+    _, _ = _seed_with_rank(app, deployment_max_lora_rank=64)
+    a = ad_store.add(
+        app.state.conn, name="r32-lora", base_model_name="qwen3-test",
+        hf_repo="o/lora",
+    )
+    adir = tmp_path / "snap"
+    adir.mkdir()
+    ad_store.set_local_path(app.state.conn, a.id, str(adir))
+    ad_store.set_lora_rank(app.state.conn, a.id, 32)
+
+    cap = _make_engine_intercept(monkeypatch, app)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/v1/chat/completions",
+            json={"model": "r32-lora", "messages": [{"role": "user", "content": "hi"}]},
+        )
+    assert r.status_code == 200, r.text
+    assert len(cap["loads"]) == 1
+
+
 @pytest.mark.asyncio
 async def test_proxy_dispatches_bare_base_unchanged(app, monkeypatch):
     _seed(app, max_loras=0)

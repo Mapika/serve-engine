@@ -37,6 +37,7 @@ class Adapter:
     created_at: str
     source_peer_id: str | None
     updated_at: str
+    lora_rank: int | None = None
 
 
 def _row_to_adapter(conn: sqlite3.Connection, row: sqlite3.Row) -> Adapter:
@@ -46,6 +47,10 @@ def _row_to_adapter(conn: sqlite3.Connection, row: sqlite3.Row) -> Adapter:
         raise RuntimeError(
             f"adapter {row['name']!r} references missing base model id={row['base_model_id']}"
         )
+    try:
+        lora_rank_value = row["lora_rank"]
+    except (KeyError, IndexError):
+        lora_rank_value = None
     return Adapter(
         id=row["id"],
         name=row["name"],
@@ -57,6 +62,7 @@ def _row_to_adapter(conn: sqlite3.Connection, row: sqlite3.Row) -> Adapter:
         created_at=row["created_at"],
         source_peer_id=row["source_peer_id"],
         updated_at=row["updated_at"],
+        lora_rank=lora_rank_value,
     )
 
 
@@ -137,6 +143,14 @@ def set_size_mb(conn: sqlite3.Connection, adapter_id: int, size_mb: int) -> None
     conn.execute(
         "UPDATE adapters SET size_mb=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
         (size_mb, adapter_id),
+    )
+
+
+def set_lora_rank(conn: sqlite3.Connection, adapter_id: int, lora_rank: int) -> None:
+    """Set the PEFT `r` value (LoRA rank) parsed from adapter_config.json."""
+    conn.execute(
+        "UPDATE adapters SET lora_rank=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (lora_rank, adapter_id),
     )
 
 

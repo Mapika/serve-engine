@@ -72,7 +72,15 @@ def adapter_pull(
         typer.echo(f"download failed: {e}", err=True)
         raise typer.Exit(1) from e
     state = "cached" if result.get("already_present") else "downloaded"
-    typer.echo(f"{state}: {result['local_path']} ({result['size_mb']} MB)")
+    rank = result.get("lora_rank")
+    rank_suffix = f", lora_rank={rank}" if rank is not None else ""
+    typer.echo(f"{state}: {result['local_path']} ({result['size_mb']} MB{rank_suffix})")
+    if rank is not None and rank > 16:
+        typer.echo(
+            f"note: adapter has lora_rank={rank}; the target deployment "
+            f"must be started with -x '--max-lora-rank={rank}' (or higher) "
+            f"— vLLM/SGLang default to 16."
+        )
 
 
 @adapter_app.command("ls")
@@ -83,14 +91,17 @@ def adapter_ls():
         typer.echo("no adapters registered")
         return
     typer.echo(
-        f"{'NAME':<28}{'BASE':<24}{'SIZE_MB':<10}{'LOADED_INTO':<14}{'DOWNLOADED'}"
+        f"{'NAME':<28}{'BASE':<24}{'SIZE_MB':<10}{'RANK':<6}"
+        f"{'LOADED_INTO':<14}{'DOWNLOADED'}"
     )
     for r in rows:
         loaded = ",".join(str(x) for x in r["loaded_into"]) or "-"
         size = str(r["size_mb"]) if r["size_mb"] is not None else "-"
+        rank = str(r.get("lora_rank")) if r.get("lora_rank") is not None else "-"
         downloaded = "yes" if r["downloaded"] else "no"
         typer.echo(
-            f"{r['name']:<28}{r['base']:<24}{size:<10}{loaded:<14}{downloaded}"
+            f"{r['name']:<28}{r['base']:<24}{size:<10}{rank:<6}"
+            f"{loaded:<14}{downloaded}"
         )
 
 

@@ -20,6 +20,11 @@ from serve_engine.store import adapters as ad_store
 from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployments as dep_store
 
+# vLLM and SGLang both default --max-lora-rank to 16 when the flag isn't
+# passed. We use this for the pre-flight rank check so a too-large adapter
+# is caught even when the operator forgot to set --max-lora-rank.
+_DEFAULT_ENGINE_MAX_LORA_RANK = 16
+
 
 @dataclass(frozen=True)
 class ResolvedTarget:
@@ -150,6 +155,21 @@ async def ensure_adapter_loaded(
     if deployment.id in loaded_ids:
         da_store.touch(conn, deployment.id, a.id)
         return False
+
+    # Pre-flight: catch rank mismatches before the engine produces a
+    # cryptic 500 on /v1/load_lora_adapter. When the deployment doesn't
+    # set max_lora_rank explicitly, fall back to the engine's default
+    # (16 for vLLM/SGLang).
+    if a.lora_rank is not None:
+        effective_max = deployment.max_lora_rank or _DEFAULT_ENGINE_MAX_LORA_RANK
+        if a.lora_rank > effective_max:
+            raise RuntimeError(
+                f"adapter {a.name!r} has lora_rank={a.lora_rank} but "
+                f"deployment #{deployment.id} was started with "
+                f"max-lora-rank={effective_max}; "
+                f"restart the deployment with "
+                f"-x '--max-lora-rank={a.lora_rank}' (or higher)"
+            )
 
     # Need to load. Evict LRU if slots full.
     if da_store.count_for_deployment(conn, deployment.id) >= deployment.max_loras:

@@ -139,6 +139,19 @@ async def create_deployment(
     backend = backends[backend_name]
     image_tag = body.image_tag or backend.image_default
     tp = body.tensor_parallel or len(body.gpu_ids)
+    # Mirror --max-lora-rank from extra_args into a first-class plan field
+    # so we can pre-flight adapter rank against it. We don't strip it from
+    # extra_args — the backend still uses extra_args to emit the flag to
+    # the engine container.
+    max_lora_rank = 0
+    raw = body.extra_args.get("--max-lora-rank")
+    if raw:
+        try:
+            max_lora_rank = int(raw)
+        except ValueError as e:
+            raise HTTPException(
+                400, f"--max-lora-rank must be an integer; got {raw!r}",
+            ) from e
     try:
         plan = DeploymentPlan(
             model_name=body.model_name,
@@ -154,6 +167,7 @@ async def create_deployment(
             idle_timeout_s=body.idle_timeout_s,
             target_concurrency=body.target_concurrency,
             max_loras=body.max_loras,
+            max_lora_rank=max_lora_rank,
             extra_args=dict(body.extra_args),
         )
     except ValueError as e:
@@ -271,6 +285,7 @@ def list_adapters(conn: sqlite3.Connection = Depends(get_conn)):
             "revision": a.revision,
             "local_path": a.local_path,
             "size_mb": a.size_mb,
+            "lora_rank": a.lora_rank,
             "loaded_into": loaded_into,
             "downloaded": a.local_path is not None,
             "created_at": a.created_at,
@@ -354,7 +369,10 @@ async def download_adapter_endpoint(
             "name": a.name, "local_path": a.local_path,
             "size_mb": a.size_mb, "already_present": True,
         }
-    from serve_engine.lifecycle.adapter_downloader import download_adapter
+    from serve_engine.lifecycle.adapter_downloader import (
+        download_adapter,
+        parse_adapter_metadata,
+    )
     try:
         local_path, size_mb = await asyncio.to_thread(
             download_adapter,
@@ -366,9 +384,17 @@ async def download_adapter_endpoint(
         raise HTTPException(502, f"download failed: {e}") from e
     ad_store.set_local_path(conn, a.id, local_path)
     ad_store.set_size_mb(conn, a.id, size_mb)
+    # Parse adapter_config.json so we can pre-flight rank against the
+    # deployment's --max-lora-rank at load time. Missing/malformed config
+    # is silently tolerated (parse returns None) — exotic formats still
+    # pull, they just lose the early rank check.
+    meta = parse_adapter_metadata(local_path)
+    if meta is not None and "lora_rank" in meta:
+        ad_store.set_lora_rank(conn, a.id, meta["lora_rank"])
     return {
         "name": a.name, "local_path": local_path,
         "size_mb": size_mb, "already_present": False,
+        "lora_rank": (meta or {}).get("lora_rank"),
     }
 
 
