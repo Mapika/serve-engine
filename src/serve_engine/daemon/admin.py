@@ -20,6 +20,7 @@ from serve_engine.store import api_keys as _ak_store
 from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
+from serve_engine.store import snapshots as snapshot_store
 
 
 def _is_uds_request(request: Request) -> bool:
@@ -532,6 +533,96 @@ async def _engine_unload_adapter(
         raise HTTPException(
             502, f"engine returned {r.status_code} on unload: {r.text[:200]}",
         )
+
+
+# -------- Snapshots (Sub-project B) --------
+
+
+class SnapshotGcRequest(BaseModel):
+    keep_last_per_model: int = 2
+    max_disk_gb: float | None = None
+
+
+@router.get("/snapshots")
+def list_snapshots(conn: sqlite3.Connection = Depends(get_conn)):
+    """List all snapshot index rows, newest-used first."""
+    return [
+        {
+            **asdict(s),
+            "key_prefix": s.key[:8],
+        }
+        for s in snapshot_store.list_all(conn)
+    ]
+
+
+@router.delete("/snapshots/{key}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_snapshot(
+    key: str,
+    conn: sqlite3.Connection = Depends(get_conn),
+    manager: LifecycleManager = Depends(get_manager),
+):
+    """Remove a snapshot's index row + on-disk dir. Passing key='all' wipes
+    every snapshot (manual reset; the GC endpoint is the usual path)."""
+    if key == "all":
+        for s in snapshot_store.list_all(conn):
+            _remove_snapshot_blob(Path(s.local_path))
+            snapshot_store.delete(conn, s.id)
+        return
+    s = snapshot_store.get_by_key(conn, key)
+    if s is None:
+        raise HTTPException(404, f"snapshot {key!r} not found")
+    _remove_snapshot_blob(Path(s.local_path))
+    snapshot_store.delete(conn, s.id)
+
+
+@router.post("/snapshots/gc")
+def gc_snapshots(
+    body: SnapshotGcRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+    manager: LifecycleManager = Depends(get_manager),
+):
+    """Two-step eviction: (1) per-(engine, hf_repo) keep newest N, drop
+    the rest; (2) if max_disk_gb is set and the total still exceeds it,
+    LRU-evict globally until under cap."""
+    removed = 0
+    if body.keep_last_per_model > 0:
+        # Walk distinct (engine, hf_repo) pairs.
+        seen: set[tuple[str, str]] = set()
+        for s in snapshot_store.list_all(conn):
+            pair = (s.engine, s.hf_repo)
+            if pair in seen:
+                continue
+            seen.add(pair)
+            victims = snapshot_store.lru_for_engine_model(
+                conn, s.engine, s.hf_repo, keep_n=body.keep_last_per_model,
+            )
+            for v in victims:
+                _remove_snapshot_blob(Path(v.local_path))
+                snapshot_store.delete(conn, v.id)
+                removed += 1
+    if body.max_disk_gb is not None and body.max_disk_gb > 0:
+        cap_mb = int(body.max_disk_gb * 1024)
+        # list_all is already sorted last_used_at DESC; reverse for LRU
+        # eviction (oldest first).
+        rows = list(snapshot_store.list_all(conn))
+        while rows and snapshot_store.total_size_mb(conn) > cap_mb:
+            victim = rows.pop()  # oldest
+            _remove_snapshot_blob(Path(victim.local_path))
+            snapshot_store.delete(conn, victim.id)
+            removed += 1
+    return {"removed": removed, "remaining_mb": snapshot_store.total_size_mb(conn)}
+
+
+def _remove_snapshot_blob(path: Path) -> None:
+    """Best-effort recursive removal of a snapshot's on-disk dir. The DB
+    row is the source of truth — if rmtree fails we still drop the row
+    and let the operator clean up the leftover directory manually."""
+    import shutil
+    if path.exists():
+        try:
+            shutil.rmtree(path)
+        except OSError:
+            pass
 
 
 @router.post("/deployments/{dep_id}/pin", status_code=status.HTTP_204_NO_CONTENT)
