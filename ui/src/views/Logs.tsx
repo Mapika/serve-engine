@@ -22,9 +22,15 @@ export default function Logs() {
   useEffect(() => {
     if (selected !== null) return
     const list = deps.data ?? []
+    // Prefer the most recently active deployment; fall back to the newest row
+    // (highest id) so we don't open onto a long-dead container by default.
     const active = list.find((d: any) => d.status === 'ready' || d.status === 'loading')
-    if (active) setSelected(active.id)
-    else if (list.length > 0) setSelected(list[list.length - 1].id)
+    if (active) {
+      setSelected(active.id)
+      return
+    }
+    const sorted = [...list].sort((a: any, b: any) => b.id - a.id)
+    if (sorted.length > 0) setSelected(sorted[0].id)
   }, [deps.data, selected])
 
   useEffect(() => {
@@ -94,9 +100,19 @@ export default function Logs() {
     stickToBottom.current = dist < 60
   }
 
-  const visibleDeps = (deps.data ?? []).filter(
-    (d: any) => d.container_id !== null && d.container_id !== undefined,
-  )
+  // Active deployments first (so the dropdown opens on something useful),
+  // then everything else by descending id (newest first). Rows without a
+  // container_id are excluded because their SSE attach always 404s.
+  const visibleDeps = (deps.data ?? [])
+    .filter((d: any) => d.container_id !== null && d.container_id !== undefined)
+    .sort((a: any, b: any) => {
+      const aLive = a.status === 'ready' || a.status === 'loading' ? 0 : 1
+      const bLive = b.status === 'ready' || b.status === 'loading' ? 0 : 1
+      if (aLive !== bLive) return aLive - bLive
+      return b.id - a.id
+    })
+
+  const selectedDep = visibleDeps.find((d: any) => d.id === selected)
 
   return (
     <div className="space-y-10">
@@ -119,14 +135,18 @@ export default function Logs() {
         <select
           className="field font-mono text-[13px] min-w-[420px]"
           value={selected ?? ''}
-          onChange={e => setSelected(e.target.value ? Number(e.target.value) : null)}
+          onChange={e => {
+            setSelected(e.target.value ? Number(e.target.value) : null)
+          }}
         >
           <option value="">select deployment</option>
           {visibleDeps.map((d: any) => {
             const m = (models.data ?? []).find((m: any) => m.id === d.model_id)
+            const live = d.status === 'ready' || d.status === 'loading'
+            const marker = live ? '●' : '·'
             return (
               <option key={d.id} value={d.id}>
-                #{d.id} / {m?.name ?? d.model_id} / {d.status}
+                {marker} #{d.id} · {m?.name ?? `model ${d.model_id}`} · {d.status}
               </option>
             )
           })}
@@ -141,8 +161,7 @@ export default function Logs() {
         <div
           ref={logRef}
           onScroll={onLogScroll}
-          className="bg-bg-page border border-rule font-mono text-[11.5px] leading-relaxed text-ink/80 overflow-y-auto h-[32rem] p-4"
-          style={{ background: '#08080a' }}
+          className="border border-rule font-mono text-[11.5px] leading-relaxed text-ink/80 overflow-y-auto h-[32rem] p-4 bg-[#08080a]"
         >
           {selected === null && (
             <div className="text-mute">select a deployment above to tail its container logs</div>
@@ -150,9 +169,26 @@ export default function Logs() {
           {selected !== null && lines.length === 0 && streaming && (
             <div className="text-mute">waiting for output<span className="caret"></span></div>
           )}
-          {lines.map((line, i) => (
-            <div key={i} className="whitespace-pre-wrap break-all">{line}</div>
-          ))}
+          {selected !== null && lines.length === 0 && !streaming && (
+            <div className="text-mute">
+              no log output. the container for #{selected}
+              {selectedDep ? ` (${selectedDep.status})` : ''} may have been removed.
+            </div>
+          )}
+          {lines.map((line, i) => {
+            const meta = line.startsWith('[serve-engine]')
+            return (
+              <div
+                key={i}
+                className={
+                  'whitespace-pre-wrap break-all ' +
+                  (meta ? 'text-accent/70' : '')
+                }
+              >
+                {line}
+              </div>
+            )
+          })}
         </div>
       </section>
 

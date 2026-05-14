@@ -37,10 +37,13 @@
 
   body {
     min-height: 100vh;
-    /* Top-of-page warm flare + subtle film grain. */
+    background-color: var(--bg-page);
     background-image:
-      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(255, 92, 42, 0.04), transparent 60%),
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' /%3E%3CfeColorMatrix values='0 0 0 0 0.92 0 0 0 0 0.89 0 0 0 0 0.82 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      /* Soft warm flare from the top — restrained, never dominant. */
+      radial-gradient(ellipse 70% 38% at 50% -8%, rgba(255, 92, 42, 0.07), transparent 65%),
+      /* Vignette: gentle darkening towards the edges to frame content. */
+      radial-gradient(ellipse 90% 70% at 50% 60%, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
+    background-attachment: fixed;
   }
 
   ::selection {

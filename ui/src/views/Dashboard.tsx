@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api'
 
 function fmtMb(mb: number | null | undefined): string {
@@ -63,10 +63,27 @@ function GpuCard({ g }: { g: any }) {
 }
 
 export default function Dashboard() {
+  const qc = useQueryClient()
   const deps = useQuery({ queryKey: ['deps'], queryFn: api.listDeployments, refetchInterval: 2000 })
   const gpus = useQuery({ queryKey: ['gpus'], queryFn: api.listGpus, refetchInterval: 2000 })
   const models = useQuery({ queryKey: ['models'], queryFn: api.listModels, refetchInterval: 5000 })
   const [showAll, setShowAll] = useState(false)
+  const [pendingId, setPendingId] = useState<number | null>(null)
+  const [actionError, setActionError] = useState('')
+
+  const stopMut = useMutation({
+    mutationFn: (id: number) => api.stopDeployment(id),
+    onMutate: id => { setPendingId(id); setActionError('') },
+    onError: (e: Error) => setActionError(e.message),
+    onSettled: () => { setPendingId(null); qc.invalidateQueries({ queryKey: ['deps'] }) },
+  })
+  const pinMut = useMutation({
+    mutationFn: ({ id, pinned }: { id: number; pinned: boolean }) =>
+      pinned ? api.unpinDeployment(id) : api.pinDeployment(id),
+    onMutate: ({ id }) => { setPendingId(id); setActionError('') },
+    onError: (e: Error) => setActionError(e.message),
+    onSettled: () => { setPendingId(null); qc.invalidateQueries({ queryKey: ['deps'] }) },
+  })
 
   const all = deps.data ?? []
   const active = all.filter((d: any) => d.status === 'ready' || d.status === 'loading')
@@ -102,6 +119,9 @@ export default function Dashboard() {
             )}
           </label>
         </div>
+        {actionError && (
+          <div className="text-err text-[11px] tracking-wider">{actionError}</div>
+        )}
         <table className="ditable">
           <thead>
             <tr>
@@ -109,9 +129,9 @@ export default function Dashboard() {
               <th>model</th>
               <th>backend</th>
               <th>status</th>
-              <th>pin</th>
               <th className="text-right">vram</th>
               <th className="text-right">gpu</th>
+              <th className="text-right">actions</th>
             </tr>
           </thead>
           <tbody>
@@ -124,6 +144,8 @@ export default function Dashboard() {
             )}
             {visible.map((d: any) => {
               const m = (models.data ?? []).find((m: any) => m.id === d.model_id)
+              const live = d.status === 'ready' || d.status === 'loading'
+              const busy = pendingId === d.id
               return (
                 <tr key={d.id} title={d.last_error || undefined}>
                   <td className="text-mute tnum">{d.id}</td>
@@ -133,9 +155,6 @@ export default function Dashboard() {
                     <span className={`dot dot-${d.status}`} />
                     <span className="text-dim">{d.status}</span>
                   </td>
-                  <td className={d.pinned ? 'text-accent' : 'text-mute'}>
-                    {d.pinned ? 'yes' : 'no'}
-                  </td>
                   <td className="text-right tnum">
                     <VramCell
                       used={d.vram_used_mb ?? null}
@@ -144,6 +163,34 @@ export default function Dashboard() {
                     />
                   </td>
                   <td className="text-right text-dim tnum">{fmtGpus(d.gpu_ids)}</td>
+                  <td className="text-right space-x-5 whitespace-nowrap">
+                    <button
+                      className={
+                        'transition-opacity hover:opacity-70 disabled:opacity-40 ' +
+                        (d.pinned ? 'text-accent' : 'text-dim')
+                      }
+                      disabled={busy}
+                      onClick={() => pinMut.mutate({ id: d.id, pinned: !!d.pinned })}
+                      title={d.pinned
+                        ? 'pinned: idle reaper will not stop this deployment'
+                        : 'pin to keep alive through idle timeout'}
+                    >
+                      {d.pinned ? 'unpin' : 'pin'}
+                    </button>
+                    {live ? (
+                      <button
+                        className="btn-link-danger disabled:opacity-40"
+                        disabled={busy}
+                        onClick={() => {
+                          if (confirm(`stop deployment #${d.id}?`)) stopMut.mutate(d.id)
+                        }}
+                      >
+                        {busy ? 'stopping...' : 'stop'}
+                      </button>
+                    ) : (
+                      <span className="text-mute">—</span>
+                    )}
+                  </td>
                 </tr>
               )
             })}
