@@ -1114,3 +1114,16 @@ def list_gpus():
         }
         for s in _read_gpu_stats()
     ]
+
+
+@router.get("/backends")
+def list_backends(backends: dict[str, Backend] = Depends(get_backends)):
+    """Registered engine backends — names, default image, capabilities."""
+    return [
+        {
+            "name": name,
+            "image_default": b.image_default,
+            "supports_adapters": getattr(b, "supports_adapters", False),
+        }
+        for name, b in sorted(backends.items())
+    ]

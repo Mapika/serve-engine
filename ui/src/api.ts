@@ -48,6 +48,9 @@ export const api = {
   createKey: (b: { name: string; tier: string }) => jfetch<any>('POST', '/admin/keys', b),
   revokeKey: (id: number) => jfetch<void>('DELETE', `/admin/keys/${id}`),
   listGpus: () => jfetch<any[]>('GET', '/admin/gpus'),
+  listBackends: () => jfetch<{ name: string; image_default: string; supports_adapters: boolean }[]>(
+    'GET', '/admin/backends',
+  ),
   loadModel: (b: any) => jfetch<any>('POST', '/admin/deployments', b),
   createStreamToken: () => jfetch<{ token: string; expires_at: number }>('POST', '/admin/stream-token'),
 

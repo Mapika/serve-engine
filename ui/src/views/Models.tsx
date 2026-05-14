@@ -1,12 +1,31 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api'
+
+type LauncherForm = {
+  backend: string  // '' = let the server pick
+  maxModelLen: string
+  gpuIds: string   // comma-separated, e.g. "0" or "0,1"
+  pinned: boolean
+}
+
+const DEFAULT_FORM: LauncherForm = {
+  backend: '',
+  maxModelLen: '4096',
+  gpuIds: '0',
+  pinned: false,
+}
 
 export default function Models() {
   const qc = useQueryClient()
   const models = useQuery({ queryKey: ['models'], queryFn: api.listModels })
+  const backends = useQuery({ queryKey: ['backends'], queryFn: api.listBackends })
+  const gpus = useQuery({ queryKey: ['gpus'], queryFn: api.listGpus })
   const [repo, setRepo] = useState('')
   const [name, setName] = useState('')
+  const [openLauncher, setOpenLauncher] = useState<string | null>(null)
+  const [form, setForm] = useState<LauncherForm>(DEFAULT_FORM)
+  const [launchError, setLaunchError] = useState('')
 
   const addModel = useMutation({
     mutationFn: () => api.createModel({
@@ -19,11 +38,36 @@ export default function Models() {
     mutationFn: (modelName: string) => api.deleteModel(modelName),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['models'] }),
   })
-  const loadDefault = useMutation({
-    mutationFn: (m: any) => api.loadModel({
-      model_name: m.name, hf_repo: m.hf_repo, gpu_ids: [0], max_model_len: 4096,
-    }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['deps'] }),
+  const launchModel = useMutation({
+    mutationFn: (m: any) => {
+      const gpuIds = form.gpuIds
+        .split(',')
+        .map(s => s.trim())
+        .filter(s => s.length > 0)
+        .map(s => Number(s))
+        .filter(n => Number.isInteger(n) && n >= 0)
+      if (gpuIds.length === 0) throw new Error('gpu_ids: provide at least one valid GPU index')
+      const maxLen = Number(form.maxModelLen)
+      if (!Number.isInteger(maxLen) || maxLen < 128) {
+        throw new Error('max_model_len: must be an integer >= 128')
+      }
+      const payload: Record<string, unknown> = {
+        model_name: m.name,
+        hf_repo: m.hf_repo,
+        gpu_ids: gpuIds,
+        max_model_len: maxLen,
+        pinned: form.pinned,
+      }
+      if (form.backend) payload.backend = form.backend
+      return api.loadModel(payload)
+    },
+    onMutate: () => setLaunchError(''),
+    onSuccess: () => {
+      setOpenLauncher(null)
+      setForm(DEFAULT_FORM)
+      qc.invalidateQueries({ queryKey: ['deps'] })
+    },
+    onError: (e: Error) => setLaunchError(e.message),
   })
 
   return (
@@ -80,27 +124,118 @@ export default function Models() {
                 </td>
               </tr>
             )}
-            {(models.data ?? []).map((m: any) => (
-              <tr key={m.id}>
-                <td>{m.name}</td>
-                <td className="text-dim">{m.hf_repo}</td>
-                <td className="text-mute">{m.revision}</td>
-                <td className="text-right space-x-6">
-                  <button
-                    className="text-accent hover:opacity-70 transition-opacity"
-                    onClick={() => loadDefault.mutate(m)}
-                  >
-                    load
-                  </button>
-                  <button
-                    className="btn-link-danger"
-                    onClick={() => delModel.mutate(m.name)}
-                  >
-                    delete
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {(models.data ?? []).map((m: any) => {
+              const isOpen = openLauncher === m.name
+              const pending = launchModel.isPending && openLauncher === m.name
+              return (
+                <Fragment key={m.id}>
+                  <tr>
+                    <td>{m.name}</td>
+                    <td className="text-dim">{m.hf_repo}</td>
+                    <td className="text-mute">{m.revision}</td>
+                    <td className="text-right space-x-6">
+                      <button
+                        className="text-accent hover:opacity-70 transition-opacity"
+                        onClick={() => {
+                          if (isOpen) {
+                            setOpenLauncher(null)
+                          } else {
+                            setOpenLauncher(m.name)
+                            setForm(DEFAULT_FORM)
+                            setLaunchError('')
+                          }
+                        }}
+                      >
+                        {isOpen ? 'cancel' : 'load'}
+                      </button>
+                      <button
+                        className="btn-link-danger"
+                        onClick={() => delModel.mutate(m.name)}
+                      >
+                        delete
+                      </button>
+                    </td>
+                  </tr>
+                  {isOpen && (
+                    <tr>
+                      <td colSpan={4} className="!pt-2 !pb-6">
+                        <div className="bg-elev/40 border border-rule p-5 space-y-4">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="space-y-1">
+                              <div className="label">backend</div>
+                              <select
+                                className="field font-mono w-full text-[12px]"
+                                value={form.backend}
+                                onChange={e => setForm(f => ({ ...f, backend: e.target.value }))}
+                              >
+                                <option value="">auto (server picks)</option>
+                                {(backends.data ?? []).map(b => (
+                                  <option key={b.name} value={b.name}>{b.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="label">max model len</div>
+                              <input
+                                className="field font-mono w-full text-[12px]"
+                                value={form.maxModelLen}
+                                onChange={e => setForm(f => ({ ...f, maxModelLen: e.target.value }))}
+                                placeholder="4096"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <div className="label">gpu ids</div>
+                              <input
+                                className="field font-mono w-full text-[12px]"
+                                value={form.gpuIds}
+                                onChange={e => setForm(f => ({ ...f, gpuIds: e.target.value }))}
+                                placeholder="0 or 0,1"
+                              />
+                              {(gpus.data ?? []).length > 0 && (
+                                <div className="text-mute text-[10px] tracking-wider">
+                                  available: {(gpus.data ?? []).map((g: any) => g.index).join(', ')}
+                                </div>
+                              )}
+                            </div>
+                            <div className="space-y-1">
+                              <div className="label">options</div>
+                              <label className="text-[12px] text-dim flex items-center gap-2 select-none cursor-pointer pt-1">
+                                <input
+                                  type="checkbox"
+                                  className="accent-accent"
+                                  checked={form.pinned}
+                                  onChange={e => setForm(f => ({ ...f, pinned: e.target.checked }))}
+                                />
+                                pin (idle reaper skips it)
+                              </label>
+                            </div>
+                          </div>
+                          {launchError && (
+                            <div className="text-err text-[11px] tracking-wider">{launchError}</div>
+                          )}
+                          <div className="flex items-center gap-3">
+                            <button
+                              className="btn-primary"
+                              disabled={pending}
+                              onClick={() => launchModel.mutate(m)}
+                            >
+                              {pending ? 'launching...' : 'deploy'}
+                            </button>
+                            <button
+                              className="btn"
+                              disabled={pending}
+                              onClick={() => setOpenLauncher(null)}
+                            >
+                              cancel
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
           </tbody>
         </table>
       </section>
