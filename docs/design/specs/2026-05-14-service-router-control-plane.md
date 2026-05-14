@@ -113,9 +113,16 @@ Initial API surface:
 - `GET /admin/service-profiles/{name}`
 - `POST /admin/service-profiles/{name}/deploy`
 - `DELETE /admin/service-profiles/{name}`
+- `GET /admin/routes`
+- `POST /admin/routes`
+- `GET /admin/routes/{name}`
+- `DELETE /admin/routes/{name}`
 
 The first implementation stores model-serving launch definitions and
-deploys them through the existing `DeploymentPlan` path. That gives the
+deploys them through the existing `DeploymentPlan` path. The first route
+implementation matches the OpenAI request body's `model` field, rewrites
+aliases to the selected service's served model name, and can fall back to
+a second profile when the primary has no ready deployment. That gives the
 router direction a concrete persistence/API layer without breaking the
 current model/deployment compatibility surface.
 

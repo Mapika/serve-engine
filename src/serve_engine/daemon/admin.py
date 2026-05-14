@@ -21,6 +21,7 @@ from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
 from serve_engine.store import service_profiles as profile_store
+from serve_engine.store import service_routes as route_store
 
 
 def _is_uds_request(request: Request) -> bool:
@@ -127,6 +128,15 @@ class CreateServiceProfileRequest(BaseModel):
     target_concurrency: int | None = None
     max_loras: int = 0
     extra_args: dict[str, str] = {}
+
+
+class CreateServiceRouteRequest(BaseModel):
+    name: str
+    match_model: str
+    profile_name: str
+    fallback_profile_name: str | None = None
+    enabled: bool = True
+    priority: int = 100
 
 
 class CreateModelRequest(BaseModel):
@@ -368,6 +378,55 @@ def delete_service_profile(
     if profile is None:
         raise HTTPException(404, f"service profile {name!r} not found")
     profile_store.delete(conn, profile.id)
+
+
+@router.get("/routes")
+def list_service_routes(conn: sqlite3.Connection = Depends(get_conn)):
+    return [asdict(r) for r in route_store.list_all(conn)]
+
+
+@router.post("/routes", status_code=status.HTTP_201_CREATED)
+def create_service_route(
+    body: CreateServiceRouteRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    try:
+        route = route_store.create(
+            conn,
+            name=body.name,
+            match_model=body.match_model,
+            profile_name=body.profile_name,
+            fallback_profile_name=body.fallback_profile_name,
+            enabled=body.enabled,
+            priority=body.priority,
+        )
+    except route_store.UnknownProfile as e:
+        raise HTTPException(404, str(e)) from e
+    except route_store.AlreadyExists as e:
+        raise HTTPException(409, str(e)) from e
+    return asdict(route)
+
+
+@router.get("/routes/{name}")
+def get_service_route(
+    name: str,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    route = route_store.get_by_name(conn, name)
+    if route is None:
+        raise HTTPException(404, f"service route {name!r} not found")
+    return asdict(route)
+
+
+@router.delete("/routes/{name}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_service_route(
+    name: str,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    route = route_store.get_by_name(conn, name)
+    if route is None:
+        raise HTTPException(404, f"service route {name!r} not found")
+    route_store.delete(conn, route.id)
 
 
 @router.delete("/deployments/{dep_id}", status_code=status.HTTP_204_NO_CONTENT)

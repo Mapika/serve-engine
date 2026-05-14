@@ -15,6 +15,8 @@ from serve_engine.store import db
 from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
+from serve_engine.store import service_profiles as profile_store
+from serve_engine.store import service_routes as route_store
 from serve_engine.store import usage_events as ue_store
 
 
@@ -235,6 +237,100 @@ async def test_proxy_populates_usage_events_tokens_after_response(app, monkeypat
     assert len(events) == 1
     assert events[0].tokens_in == 3
     assert events[0].tokens_out == 1
+
+
+@pytest.mark.asyncio
+async def test_proxy_routes_model_alias_to_service_profile(app, monkeypatch):
+    _seed(app, max_loras=0)
+    conn = app.state.conn
+    profile_store.create(
+        conn,
+        name="qwen-service",
+        model_name="qwen3-test",
+        hf_repo="o/qwen3",
+        revision="main",
+        backend="vllm",
+        image_tag="vllm:test",
+        gpu_ids=[0],
+        tensor_parallel=1,
+        max_model_len=4096,
+        dtype="auto",
+    )
+    route_store.create(
+        conn,
+        name="public-chat",
+        match_model="chat",
+        profile_name="qwen-service",
+    )
+    cap = _make_engine_intercept(monkeypatch, app)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/v1/chat/completions",
+            json={"model": "chat", "messages": [{"role": "user", "content": "hi"}]},
+        )
+    assert r.status_code == 200, r.text
+    assert cap["chats"][0]["body"]["model"] == "qwen3-test"
+
+    events = ue_store.list_recent(conn, limit=10)
+    assert len(events) == 1
+    assert events[0].model_name == "chat"
+    assert events[0].base_name == "qwen3-test"
+
+
+@pytest.mark.asyncio
+async def test_proxy_uses_service_route_fallback_when_primary_not_ready(app, monkeypatch):
+    _seed(app, max_loras=0)
+    conn = app.state.conn
+    profile_store.create(
+        conn,
+        name="cold-primary",
+        model_name="cold-model",
+        hf_repo="o/cold",
+        revision="main",
+        backend="vllm",
+        image_tag="vllm:test",
+        gpu_ids=[0],
+        tensor_parallel=1,
+        max_model_len=4096,
+        dtype="auto",
+    )
+    profile_store.create(
+        conn,
+        name="warm-fallback",
+        model_name="qwen3-test",
+        hf_repo="o/qwen3",
+        revision="main",
+        backend="vllm",
+        image_tag="vllm:test",
+        gpu_ids=[0],
+        tensor_parallel=1,
+        max_model_len=4096,
+        dtype="auto",
+    )
+    route_store.create(
+        conn,
+        name="public-chat",
+        match_model="chat",
+        profile_name="cold-primary",
+        fallback_profile_name="warm-fallback",
+    )
+    cap = _make_engine_intercept(monkeypatch, app)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/v1/chat/completions",
+            json={"model": "chat", "messages": [{"role": "user", "content": "hi"}]},
+        )
+    assert r.status_code == 200, r.text
+    assert cap["chats"][0]["body"]["model"] == "qwen3-test"
+
+    events = ue_store.list_recent(conn, limit=10)
+    assert len(events) == 1
+    assert events[0].model_name == "chat"
+    assert events[0].base_name == "qwen3-test"
 
 
 @pytest.mark.asyncio

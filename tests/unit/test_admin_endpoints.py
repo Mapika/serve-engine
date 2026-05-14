@@ -152,6 +152,66 @@ async def test_service_profile_duplicate_409(app):
 
 
 @pytest.mark.asyncio
+async def test_service_route_crud(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        r = await c.post(
+            "/admin/service-profiles",
+            json={
+                "name": "qwen-service",
+                "model_name": "qwen",
+                "hf_repo": "org/qwen",
+                "backend": "vllm",
+                "gpu_ids": [0],
+            },
+        )
+        assert r.status_code == 201, r.text
+
+        r = await c.post(
+            "/admin/routes",
+            json={
+                "name": "public-chat",
+                "match_model": "chat",
+                "profile_name": "qwen-service",
+                "priority": 10,
+            },
+        )
+        assert r.status_code == 201, r.text
+        route = r.json()
+        assert route["name"] == "public-chat"
+        assert route["match_model"] == "chat"
+        assert route["profile_name"] == "qwen-service"
+        assert route["target_model_name"] == "qwen"
+        assert route["priority"] == 10
+
+        r = await c.get("/admin/routes")
+        assert r.status_code == 200
+        assert [row["name"] for row in r.json()] == ["public-chat"]
+
+        r = await c.get("/admin/routes/public-chat")
+        assert r.status_code == 200
+        assert r.json()["target_model_name"] == "qwen"
+
+        r = await c.delete("/admin/routes/public-chat")
+        assert r.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_service_route_unknown_profile_404(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        r = await c.post(
+            "/admin/routes",
+            json={
+                "name": "broken",
+                "match_model": "chat",
+                "profile_name": "missing",
+            },
+        )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_delete_model_rejects_active_deployment(app):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:

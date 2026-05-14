@@ -21,6 +21,7 @@ from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import key_usage as _key_usage_store
 from serve_engine.store import models as model_store
+from serve_engine.store import service_routes as _route_store
 from serve_engine.store import usage_events as _usage_events_store
 
 router = APIRouter()
@@ -54,17 +55,57 @@ async def _proxy(
     if not model_name:
         raise HTTPException(400, detail="request body must include 'model'")
 
+    requested_model_name = model_name
+    route = _route_store.find_enabled_for_model(conn, requested_model_name)
+    candidate_model_names = [requested_model_name]
+    if route is not None:
+        candidate_model_names = [route.target_model_name]
+        if route.fallback_model_name is not None:
+            candidate_model_names.append(route.fallback_model_name)
+
     # Resolve `model` to (base, optional adapter). Bare base names route
     # exactly as v1 did. Adapter names cause us to (a) pick a deployment
     # of the adapter's base that has the adapter loaded or can hot-load
     # it, and (b) rewrite the upstream payload's `model` to the adapter
     # name so vLLM/SGLang dispatch against the right LoRA slot.
-    try:
-        target = resolve_target(conn, model_name)
-    except UnknownModel as e:
-        raise HTTPException(404, detail=str(e)) from e
+    target = None
+    active = None
+    routed_model_name = requested_model_name
+    unknown_error: UnknownModel | None = None
+    for candidate_model_name in candidate_model_names:
+        try:
+            candidate_target = resolve_target(conn, candidate_model_name)
+        except UnknownModel as e:
+            unknown_error = e
+            continue
+        candidate = find_deployment_for(
+            conn,
+            candidate_target.base_model_name,
+            candidate_target.adapter_name,
+        )
+        if candidate is not None and candidate.container_address is not None:
+            target = candidate_target
+            active = candidate
+            routed_model_name = candidate_model_name
+            break
 
-    active = find_deployment_for(conn, target.base_model_name, target.adapter_name)
+    if target is None:
+        if route is not None:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    f"route {route.name!r} for model {requested_model_name!r} "
+                    "has no ready primary or fallback service"
+                ),
+            )
+        if unknown_error is not None:
+            raise HTTPException(404, detail=str(unknown_error)) from unknown_error
+        try:
+            target = resolve_target(conn, requested_model_name)
+        except UnknownModel as e:
+            raise HTTPException(404, detail=str(e)) from e
+        active = find_deployment_for(conn, target.base_model_name, target.adapter_name)
+
     if active is None or active.container_address is None:
         # Differentiate: no deployment at all vs adapter requested but no
         # LoRA-enabled deployment available.
@@ -74,7 +115,7 @@ async def _proxy(
                 f"with --max-loras > 0 for adapter {target.adapter_name!r}"
             )
         else:
-            detail = f"no ready deployment for model {model_name!r}"
+            detail = f"no ready deployment for model {requested_model_name!r}"
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
 
     backend = backends.get(active.backend)
@@ -105,7 +146,7 @@ async def _proxy(
     # stream completes and the usage tracker extracts them.
     usage_event_id = _usage_events_store.record(
         conn,
-        model_name=model_name,
+        model_name=requested_model_name,
         base_name=target.base_model_name,
         adapter_name=target.adapter_name,
         deployment_id=active.id,
@@ -116,15 +157,13 @@ async def _proxy(
     # Rewrite the upstream payload's `model` field to the adapter name
     # when an adapter is in play — vLLM/SGLang both treat the OpenAI
     # `model` field as the LoRA slot name when --enable-lora is on.
-    if target.adapter_name and target.adapter_name != model_name:
+    upstream_model_name = target.adapter_name or target.base_model_name
+    if upstream_model_name != requested_model_name or routed_model_name != requested_model_name:
         try:
-            parsed["model"] = target.adapter_name
+            parsed["model"] = upstream_model_name
             body = json.dumps(parsed).encode()
         except (TypeError, json.JSONDecodeError):
             pass  # body already validated as JSON above; should not happen
-    elif target.adapter_name:
-        # bare adapter name was passed; no rewrite needed
-        pass
 
     base = f"http://{active.container_address}:{active.container_port}{backend.openai_base}"
     _HOP_BY_HOP = {"host", "content-length", "transfer-encoding", "connection"}
