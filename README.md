@@ -1,20 +1,22 @@
 # serve-engine
 
-A single-node, multi-user LLM inference orchestrator over vLLM, SGLang, and TensorRT-LLM.
+A high-performance local inference router and lifecycle manager for heterogeneous model-serving services.
 
-`serve-engine` solves the operator-UX gap left by `vllm serve` / `python -m sglang.launch_server` / `trtllm-serve`: one daemon, multiple models, pin / auto-swap lifecycle, OpenAI-compatible HTTP, API keys with proper rate limits, a small web UI, and live observability — on one GPU box.
+`serve-engine` gives teams one OpenAI-compatible front door while it starts, stops, health-checks, routes to, and supervises local inference services such as vLLM, SGLang, and TensorRT-LLM. It is the control plane around model servers, not another model server.
 
-**Status:** core lifecycle, observability, auth, and three engine backends (vLLM, SGLang, TensorRT-LLM) verified end-to-end on H100 and RTX PRO 6000 Blackwell. 363 unit + integration tests, ruff clean.
+**Status:** core lifecycle, observability, auth, routing, and three engine backends are implemented. Verified on H100 and RTX PRO 6000 Blackwell; 331 unit tests and `ruff` are clean in the current tree.
 
 ## What it does
 
-- **One daemon, many models.** Register N models, pin some, let the rest auto-swap on demand. KV-aware GPU placement picks where each model lands.
-- **Engine pluggability.** Same `/v1/chat/completions` API regardless of whether the model is served by vLLM, SGLang, or TensorRT-LLM. Engine choice is per-model (`--engine vllm|sglang|trtllm`) or YAML-driven by pattern (`backends/selection.yaml`). Auto target-concurrency picks `--max-num-seqs` / `--max_batch_size` from model architecture so small models don't get the conservative 30B-class default.
-- **OpenAI-compatible.** Drop-in: anything that speaks the OpenAI API (Python SDK, JS SDK, LangChain, `curl`) just works. Auth via `Authorization: Bearer sk-...`.
+- **One router, many services.** Register and launch inference backends, keep them health-gated, and route OpenAI-compatible traffic to the right ready service.
+- **Lifecycle control.** Start, stop, pin, autosuspend by idle timeout, reconcile after daemon restarts, and preserve failed-load logs for diagnosis.
+- **Backend pluggability.** vLLM, SGLang, and TensorRT-LLM are backend implementations behind the same router. Engine choice is per launch (`--engine vllm|sglang|trtllm`) or YAML-driven by pattern (`backends/selection.yaml`).
+- **Performance-aware launch defaults.** KV-aware GPU placement picks where each service lands. Auto target-concurrency picks `--max-num-seqs` / `--max_batch_size` from model architecture so small models do not inherit conservative 30B-class defaults.
+- **OpenAI-compatible front door.** Drop-in: anything that speaks the OpenAI API (Python SDK, JS SDK, LangChain, `curl`) just works. Auth via `Authorization: Bearer sk-...`.
 - **Real rate limits.** Eight-window sliding limiter (RPM, RPH, RPD, RPW × tokens and requests), per-tier defaults + per-key overrides, returns `429` with `Retry-After`.
-- **Crash-safe.** Graceful shutdown stops engines cleanly; startup reconciliation re-adopts surviving containers or marks orphans failed.
 - **Observable.** Prometheus `/metrics` aggregated across engines, `/admin/events` SSE for lifecycle transitions, `/admin/gpus` for live per-GPU stats, `serve top` for a terminal dashboard.
-- **Web UI.** Five screens (dashboard, models, playground, keys, logs) bundled into the Python package — no separate frontend deploy.
+- **Backend capabilities.** Dynamic LoRA adapters are supported where the backend supports them, but they are treated as one service capability rather than the product's center of gravity.
+- **Web UI.** Operator screens for dashboard, models, adapters, predictor, playground, keys, and logs are bundled into the Python package — no separate frontend deploy.
 - **Bootstrap-friendly.** `serve doctor` diagnoses the environment; `serve setup` does the interactive first-run.
 
 ## Requirements
@@ -100,7 +102,7 @@ serve update-engines      # check Docker Hub for newer pinned tags
                        │  /admin/gpus                │         │
                        │  /  (web UI)                │         │
                        │                             ▼         │
-   CLI ───UDS sock─────┤  LifecycleManager  ──┐  proxy router  │
+   CLI ───UDS sock─────┤  service lifecycle ──┐  proxy router  │
                        │  ↑   ↓               │     │          │
                        │  ↑   reconcile/stop  │     │          │
                        │  EventBus → SSE      │     │          │
@@ -113,18 +115,31 @@ serve update-engines      # check Docker Hub for newer pinned tags
                                    │
                                    ▼
                           ┌────────────────────────────────┐
-                          │  Engine containers (one/model) │
+                          │  Runnable inference services   │
                           │    vllm/vllm-openai            │
                           │    lmsysorg/sglang             │
+                          │    tensorrt-llm/*              │
                           │  bound to 127.0.0.1:<random>   │
                           └────────────────────────────────┘
 ```
 
 - **Daemon** runs on the host, single Python process, async end-to-end.
-- **Engines** run as separate containers via the Docker API. Daemon talks to them over a host-bound random port (no shared-network hop, no DNS surprises).
+- **Services** currently run as separate engine containers via the Docker API. The daemon talks to them over a host-bound random port (no shared-network hop, no DNS surprises).
+- **Router** currently maps OpenAI `model` names to ready deployments. The next abstraction layer generalizes this into explicit service profiles, route rules, and routing policy.
 - **State** lives in SQLite at `~/.serve/db.sqlite` (models, deployments, API keys, usage).
 - **Backend abstraction**: each engine is a `Backend` Protocol implementation; argv differences (`--model` vs `--model-path`, `--gpu-memory-utilization` vs `--mem-fraction-static`) live entirely inside the engine class.
 - **Manifest-driven**: image tags, internal ports, and engine-specific headroom constants come from `src/serve_engine/backends/backends.yaml`. Override per-host in `~/.serve/backends.override.yaml`.
+
+## Direction
+
+The product direction is a router/control-plane abstraction, with "model serving" as the first service family:
+
+- **Service profiles:** saved launch definitions for vLLM, SGLang, TRT-LLM, llama.cpp, embedding servers, rerankers, or custom HTTP services.
+- **Route rules:** map model names, OpenAI endpoints, tenants, or custom paths to services.
+- **Routing policy:** health-gated routing first, then least-loaded, fallback, canary, queue-aware, and warm-only policies.
+- **Backpressure:** per-service concurrency caps, queue limits, timeouts, and predictable overload behavior.
+- **Autosuspend/autostart:** keep hot services ready, stop idle services, and optionally queue while a stopped service starts.
+- **Driver interface:** Docker first; process, remote HTTP, and cluster drivers can follow without changing the router.
 
 ## On-disk layout
 
@@ -164,7 +179,11 @@ Engine saturation on the small Qwens is ~14k tokens/sec aggregate.
 
 ## Design docs and plans
 
-The implementation was built in seven stacked plans (`docs/design/plans/`) plus an initial design (`docs/design/specs/`). Each plan was verified live on an H100 before the next one started.
+Current direction:
+
+- Service router and lifecycle control plane — `docs/design/specs/2026-05-14-service-router-control-plane.md`
+
+Historical implementation plans live in `docs/design/plans/` plus earlier specs in `docs/design/specs/`. Some older v2 notes discuss adapter-first and snapshot-first directions; those are retained as history and are superseded by the service-router direction.
 
 - Plan 01 — walking skeleton (daemon + CLI + vLLM container)
 - Plan 02 — multi-model lifecycle (pin / auto-swap / KV-aware placement)
@@ -180,7 +199,7 @@ The implementation was built in seven stacked plans (`docs/design/plans/`) plus 
 ```bash
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
-pytest                    # 363 tests, ~30s
+pytest tests/unit         # 331 unit tests in the current tree
 ruff check src/ tests/
 
 # UI dev (optional — repo ships pre-built dist)

@@ -4,6 +4,11 @@
 **Date:** 2026-05-13
 **Working name:** v2.0 (final tag TBD; could ship as 0.2.0 / 1.0.0 / etc.)
 
+> Superseded direction note: this document is retained as historical
+> brainstorming. The current product direction is the service router and
+> lifecycle control plane described in
+> `docs/design/specs/2026-05-14-service-router-control-plane.md`.
+
 ## 1. Where v1 ended
 
 v1 shipped a single-node, multi-model, multi-user inference orchestrator
