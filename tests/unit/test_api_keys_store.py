@@ -68,6 +68,55 @@ def test_count_active(tmp_path):
     assert api_keys.count_active(conn) == 1
 
 
+def test_allowed_models_roundtrip(tmp_path):
+    """Round-trip the optional per-key model allowlist.
+
+    Covers all three states:
+    - None (default) means unrestricted - persisted as NULL, decoded as None.
+    - [] means deny-all - persisted as the literal JSON "[]", decoded as [].
+    - [<names>] persisted as JSON, decoded back as a list of strings.
+
+    set_allowed_models toggles between states. Empty string in the DB
+    (legacy/edge) decodes to None like NULL.
+    """
+    conn = _fresh(tmp_path)
+
+    # Default: unrestricted.
+    _, key = api_keys.create(conn, name="default", tier="standard")
+    assert key.allowed_models is None
+    assert api_keys.get_by_id(conn, key.id).allowed_models is None
+
+    # Set an allowlist.
+    api_keys.set_allowed_models(conn, key.id, ["llama-1b", "qwen-3"])
+    fetched = api_keys.get_by_id(conn, key.id)
+    assert fetched.allowed_models == ["llama-1b", "qwen-3"]
+
+    # Empty list = deny-all (must survive the round-trip, NOT collapse to None).
+    api_keys.set_allowed_models(conn, key.id, [])
+    fetched = api_keys.get_by_id(conn, key.id)
+    assert fetched.allowed_models == []
+
+    # Back to None = unrestricted.
+    api_keys.set_allowed_models(conn, key.id, None)
+    fetched = api_keys.get_by_id(conn, key.id)
+    assert fetched.allowed_models is None
+
+    # create() also accepts the param up front.
+    _, k2 = api_keys.create(
+        conn, name="restricted", tier="standard",
+        allowed_models=["only-this"],
+    )
+    assert k2.allowed_models == ["only-this"]
+
+    # verify() returns the same shape.
+    secret, k3 = api_keys.create(
+        conn, name="for-verify", tier="standard", allowed_models=["a", "b"],
+    )
+    verified = api_keys.verify(conn, secret)
+    assert verified is not None
+    assert verified.allowed_models == ["a", "b"]
+
+
 def test_concurrent_verify_and_count_does_not_corrupt_cursor(tmp_path):
     """Regression: dashboard 500s on stop/restart were caused by concurrent
     sqlite3 access from FastAPI's worker-thread pool. With the LockedConnection

@@ -55,6 +55,23 @@ async def _proxy(
     if not model_name:
         raise HTTPException(400, detail="request body must include 'model'")
 
+    # Optional per-key model allowlist (migration 013).
+    # - key is None: UDS request or no-keys-registered bypass; skip the check.
+    # - key.allowed_models is None: unrestricted key; skip the check.
+    # - key.allowed_models == []: deny-all; the loop below rejects every model.
+    # - key.allowed_models == [...]: restrict to listed names.
+    # The check fires on the user-facing requested model name (the one the
+    # client wrote in the request body), NOT the resolved upstream target -
+    # otherwise a route alias would silently bypass the allowlist.
+    if key is not None and key.allowed_models is not None:
+        if model_name not in key.allowed_models:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"key {key.name!r} does not have access to model {model_name!r}"
+                ),
+            )
+
     requested_model_name = model_name
     route = _route_store.find_enabled_for_model(conn, requested_model_name)
     candidate_model_names = [requested_model_name]

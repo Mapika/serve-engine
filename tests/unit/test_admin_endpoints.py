@@ -572,6 +572,107 @@ async def test_admin_route_requires_admin_tier(tmp_path, monkeypatch):
         assert r.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_patch_key_allowed_models_success(app):
+    """PATCH /admin/keys/{id} updates the key's allowlist and returns 204.
+
+    Round-trips all three states (None, [...], []) through the HTTP layer to
+    verify the JSON body's `allowed_models` shape matches what the store
+    persists and what GET /admin/keys surfaces.
+    """
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        # First key bypasses auth (no keys registered yet).
+        r = await c.post("/admin/keys", json={"name": "alice", "tier": "admin"})
+        assert r.status_code == 201
+        kid = r.json()["id"]
+        secret = r.json()["secret"]
+        auth = {"Authorization": f"Bearer {secret}"}
+
+        # Default state: unrestricted.
+        r = await c.get("/admin/keys", headers=auth)
+        assert r.status_code == 200
+        row = next(k for k in r.json() if k["id"] == kid)
+        assert row["allowed_models"] is None
+
+        # Set an allowlist.
+        r = await c.patch(
+            f"/admin/keys/{kid}",
+            headers=auth,
+            json={"allowed_models": ["llama-1b", "qwen-3"]},
+        )
+        assert r.status_code == 204
+
+        r = await c.get("/admin/keys", headers=auth)
+        row = next(k for k in r.json() if k["id"] == kid)
+        assert row["allowed_models"] == ["llama-1b", "qwen-3"]
+
+        # Empty list = deny-all; must round-trip through the wire as [].
+        r = await c.patch(
+            f"/admin/keys/{kid}",
+            headers=auth,
+            json={"allowed_models": []},
+        )
+        assert r.status_code == 204
+        r = await c.get("/admin/keys", headers=auth)
+        row = next(k for k in r.json() if k["id"] == kid)
+        assert row["allowed_models"] == []
+
+        # Back to null = unrestricted.
+        r = await c.patch(
+            f"/admin/keys/{kid}",
+            headers=auth,
+            json={"allowed_models": None},
+        )
+        assert r.status_code == 204
+        r = await c.get("/admin/keys", headers=auth)
+        row = next(k for k in r.json() if k["id"] == kid)
+        assert row["allowed_models"] is None
+
+
+@pytest.mark.asyncio
+async def test_patch_key_404_when_missing(app):
+    """PATCH on a nonexistent key id returns 404."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        # No keys exist - the bypass is active so we don't need to authenticate.
+        r = await c.patch(
+            "/admin/keys/99999",
+            json={"allowed_models": ["nope"]},
+        )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_key_with_allowed_models(app):
+    """POST /admin/keys persists allowed_models when supplied."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        # First create an admin key for follow-up auth - once a key exists,
+        # the no-keys bypass disables and subsequent admin reads need a
+        # bearer (and admin tier).
+        r = await c.post("/admin/keys", json={"name": "root", "tier": "admin"})
+        assert r.status_code == 201
+        admin_auth = {"Authorization": f"Bearer {r.json()['secret']}"}
+
+        r = await c.post(
+            "/admin/keys",
+            headers=admin_auth,
+            json={
+                "name": "scoped",
+                "tier": "standard",
+                "allowed_models": ["llama-1b"],
+            },
+        )
+        assert r.status_code == 201
+        kid = r.json()["id"]
+
+        # Listing reflects the stored allowlist.
+        r = await c.get("/admin/keys", headers=admin_auth)
+        row = next(k for k in r.json() if k["id"] == kid)
+        assert row["allowed_models"] == ["llama-1b"]
+
+
 def test_stream_ticket_authorizes_only_stream_routes(app):
     from unittest.mock import MagicMock
 

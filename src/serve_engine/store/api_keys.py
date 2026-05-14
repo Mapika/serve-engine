@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 import sqlite3
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ class ApiKey:
     rpw_override: int | None
     tpw_override: int | None
     revoked_at: str | None
+    allowed_models: list[str] | None = None
     usage_event_id: int | None = None
 
 
@@ -28,7 +30,34 @@ def _hash(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
 
 
+def _decode_allowed_models(raw: object) -> list[str] | None:
+    """NULL and empty string both map to None (unrestricted).
+
+    Empty JSON list `[]` decodes to [] and is preserved as "restrict-all"
+    (no model is allowed). Malformed JSON is treated as None defensively;
+    the column is operator-managed and a bad value shouldn't lock the key
+    out entirely, but we still log nothing here - the proxy will allow.
+    """
+    if raw is None or raw == "":
+        return None
+    try:
+        decoded = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(decoded, list):
+        return None
+    return [str(x) for x in decoded]
+
+
 def _row_to_key(row: sqlite3.Row) -> ApiKey:
+    # `allowed_models` was added in migration 013; older rows in databases
+    # that haven't run migrations would lack the column. We read defensively
+    # via row.keys() so unit tests against fresh schemas and any legacy
+    # rows both work.
+    try:
+        raw_allow = row["allowed_models"]
+    except (IndexError, KeyError):
+        raw_allow = None
     return ApiKey(
         id=row["id"],
         name=row["name"],
@@ -43,6 +72,7 @@ def _row_to_key(row: sqlite3.Row) -> ApiKey:
         rpw_override=row["rpw_override"],
         tpw_override=row["tpw_override"],
         revoked_at=row["revoked_at"],
+        allowed_models=_decode_allowed_models(raw_allow),
     )
 
 
@@ -59,29 +89,51 @@ def create(
     tph_override: int | None = None,
     rpw_override: int | None = None,
     tpw_override: int | None = None,
+    allowed_models: list[str] | None = None,
 ) -> tuple[str, ApiKey]:
     """Generate a new key. Returns (secret, ApiKey). The secret is only available here."""
     body = secrets.token_urlsafe(32)
     secret = f"sk-{body}"
     prefix = secret[:12]
     key_hash = _hash(secret)
+    allowed_json = (
+        json.dumps(list(allowed_models)) if allowed_models is not None else None
+    )
     cur = conn.execute(
         """
         INSERT INTO api_keys
             (name, prefix, key_hash, tier,
              rpm_override, tpm_override, rpd_override, tpd_override,
-             rph_override, tph_override, rpw_override, tpw_override)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             rph_override, tph_override, rpw_override, tpw_override,
+             allowed_models)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             name, prefix, key_hash, tier,
             rpm_override, tpm_override, rpd_override, tpd_override,
             rph_override, tph_override, rpw_override, tpw_override,
+            allowed_json,
         ),
     )
     fetched = get_by_id(conn, cur.lastrowid)
     assert fetched is not None
     return secret, fetched
+
+
+def set_allowed_models(
+    conn: sqlite3.Connection,
+    key_id: int,
+    models: list[str] | None,
+) -> None:
+    """Update a key's allowlist. None clears the restriction; [] denies all.
+
+    Returns nothing; callers should check existence separately via get_by_id.
+    """
+    encoded = json.dumps(list(models)) if models is not None else None
+    conn.execute(
+        "UPDATE api_keys SET allowed_models=? WHERE id=?",
+        (encoded, key_id),
+    )
 
 
 def get_by_id(conn: sqlite3.Connection, key_id: int) -> ApiKey | None:

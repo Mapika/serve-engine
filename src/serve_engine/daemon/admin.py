@@ -1027,6 +1027,16 @@ class CreateKeyRequest(BaseModel):
     tpd_override: int | None = None
     rpw_override: int | None = None
     tpw_override: int | None = None
+    # None = unrestricted (default), [] = deny-all, [<name>...] = allowlist.
+    allowed_models: list[str] | None = None
+
+
+class UpdateKeyRequest(BaseModel):
+    # We use the `default factory sentinel` pattern via the explicit-None
+    # semantics of the column: PATCH bodies must include `allowed_models`
+    # to change it. There is no partial-update path that omits the field,
+    # so a missing key in JSON is rejected as 422 by pydantic.
+    allowed_models: list[str] | None = None
 
 
 @router.post("/stream-token")
@@ -1044,6 +1054,7 @@ def list_keys(conn: sqlite3.Connection = Depends(get_conn)):
             "prefix": k.prefix,
             "tier": k.tier,
             "revoked": k.revoked_at is not None,
+            "allowed_models": k.allowed_models,
         }
         for k in _ak_store.list_all(conn)
     ]
@@ -1060,6 +1071,7 @@ def create_key(
         rph_override=body.rph_override, tph_override=body.tph_override,
         rpd_override=body.rpd_override, tpd_override=body.tpd_override,
         rpw_override=body.rpw_override, tpw_override=body.tpw_override,
+        allowed_models=body.allowed_models,
     )
     return {
         "id": k.id,
@@ -1068,6 +1080,17 @@ def create_key(
         "tier": k.tier,
         "secret": secret,
     }
+
+
+@router.patch("/keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+def update_key(
+    key_id: int,
+    body: UpdateKeyRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    if _ak_store.get_by_id(conn, key_id) is None:
+        raise HTTPException(404, f"no key with id {key_id}")
+    _ak_store.set_allowed_models(conn, key_id, body.allowed_models)
 
 
 @router.delete("/keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
