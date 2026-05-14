@@ -1,43 +1,70 @@
 # serve-engine
 
-A high-performance local inference router and lifecycle manager for heterogeneous model-serving services.
+serve-engine is a local inference router and lifecycle manager.
 
-`serve-engine` gives teams one OpenAI-compatible front door while it starts, stops, health-checks, routes to, and supervises local inference services such as vLLM, SGLang, and TensorRT-LLM. It is the control plane around model servers, not another model server.
+It gives one OpenAI-compatible endpoint to a GPU host, then manages the
+services behind it: start, stop, health check, route, observe, and clean up.
+The engines still do the inference. serve-engine owns the operational layer
+around them.
 
-**Status:** core lifecycle, observability, auth, routing, and three engine backends are implemented. Verified on H100 and RTX PRO 6000 Blackwell; 331 unit tests and `ruff` are clean in the current tree.
+The opinionated part is simple: engines should be replaceable, routes should
+be explicit, and a single-node GPU box should not need a full platform just to
+run a few reliable model services.
 
-## What it does
+## Status
 
-- **One router, many services.** Register and launch inference backends, keep them health-gated, and route OpenAI-compatible traffic to the right ready service.
-- **Lifecycle control.** Start, stop, pin, autosuspend by idle timeout, reconcile after daemon restarts, and preserve failed-load logs for diagnosis.
-- **Backend pluggability.** vLLM, SGLang, and TensorRT-LLM are backend implementations behind the same router. Engine choice is per launch (`--engine vllm|sglang|trtllm`) or YAML-driven by pattern (`backends/selection.yaml`).
-- **Performance-aware launch defaults.** KV-aware GPU placement picks where each service lands. Auto target-concurrency picks `--max-num-seqs` / `--max_batch_size` from model architecture so small models do not inherit conservative 30B-class defaults.
-- **OpenAI-compatible front door.** Drop-in: anything that speaks the OpenAI API (Python SDK, JS SDK, LangChain, `curl`) just works. Auth via `Authorization: Bearer sk-...`.
-- **Real rate limits.** Eight-window sliding limiter (RPM, RPH, RPD, RPW × tokens and requests), per-tier defaults + per-key overrides, returns `429` with `Retry-After`.
-- **Observable.** Prometheus `/metrics` aggregated across engines, `/admin/events` SSE for lifecycle transitions, `/admin/gpus` for live per-GPU stats, `serve top` for a terminal dashboard.
-- **Backend capabilities.** Dynamic LoRA adapters are supported where the backend supports them, but they are treated as one service capability rather than the product's center of gravity.
-- **Web UI.** Operator screens for dashboard, models, adapters, predictor, playground, keys, and logs are bundled into the Python package — no separate frontend deploy.
-- **Bootstrap-friendly.** `serve doctor` diagnoses the environment; `serve setup` does the interactive first-run.
+Works today:
+
+- Single-node NVIDIA hosts
+- Docker-backed lifecycle for engine containers
+- vLLM and SGLang tested end to end through the router on a real GPU
+- TensorRT-LLM backend adapter present
+- OpenAI-compatible `/v1/chat/completions`, `/v1/completions`,
+  `/v1/embeddings`, and `/v1/models`
+- Model registry, deployments, service profiles, and explicit route rules
+- API keys, admin keys, and request/token rate limits
+- Prometheus metrics, GPU stats, lifecycle events, logs, and `serve top`
+- Web UI bundled into the Python package
+
+Not the focus:
+
+- Training
+- Multi-host tensor parallelism
+- Being a new inference engine
+- Making adapters or LoRA the product identity
+- Replacing Kubernetes for large fleets
 
 ## Requirements
 
-- Linux + an NVIDIA GPU (single-node; no multi-host support)
-- Docker 24+ with GPU access (the daemon spawns engine containers via the Docker API)
-- Python 3.11+ and [`uv`](https://docs.astral.sh/uv/) (recommended) or pip
+- Linux
+- NVIDIA GPU
+- Docker 24+ with NVIDIA GPU access
+- Python 3.11+
+- [`uv`](https://docs.astral.sh/uv/) recommended
 
 ## Install
 
-### Option 1 — `uv tool install` (recommended)
+From source:
 
 ```bash
 git clone https://github.com/Mapika/serve-engine
 cd serve-engine
 uv tool install --editable .
 serve doctor
-serve setup        # interactive wizard
 ```
 
-### Option 2 — daemon-as-container
+For development:
+
+```bash
+git clone https://github.com/Mapika/serve-engine
+cd serve-engine
+uv venv
+source .venv/bin/activate
+uv pip install -e ".[dev]"
+serve doctor
+```
+
+Daemon in a container:
 
 ```bash
 git clone https://github.com/Mapika/serve-engine
@@ -50,169 +77,329 @@ docker run -d --name serve \
   serve-engine:dev
 ```
 
-## Quickstart
+The daemon container does not run inference itself. It talks to the host Docker
+socket and starts separate engine containers.
+
+## First Run
+
+Start the daemon:
 
 ```bash
 serve daemon start
-serve pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b   # registers AND downloads
-serve run qwen-0_5b --gpu 0 --pin                        # pinned (never auto-evict)
-serve pull Qwen/Qwen2.5-1.5B-Instruct --name qwen-1_5b
-serve run qwen-1_5b --gpu 0 --idle-timeout 60            # auto-evict after 60s idle
-
-curl http://127.0.0.1:11500/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"qwen-0_5b","messages":[{"role":"user","content":"Hello"}]}'
+serve daemon status
 ```
 
-For the web UI: `serve key create web --tier admin` (creates the first admin key over the local UDS, no auth needed), then open `http://127.0.0.1:11500/` and paste the secret.
+Create an admin key:
+
+```bash
+serve key create web --tier admin
+```
+
+Save the printed `secret:` value:
+
+```bash
+export SERVE_TOKEN=sk-...
+export SERVE_URL=http://127.0.0.1:11500
+```
+
+Open the web UI at:
+
+```text
+http://127.0.0.1:11500/
+```
+
+Paste the admin key when prompted.
+
+Local CLI commands use the daemon Unix socket and do not need the HTTP bearer
+token. TCP admin and `/v1/*` requests need a bearer token once any key exists.
+
+## Quick Start
+
+Register and download a small model:
+
+```bash
+serve pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
+```
+
+Start it on GPU 0:
+
+```bash
+serve run qwen-0_5b --gpu 0 --engine vllm --pin
+serve ps
+```
+
+Call the OpenAI-compatible API:
+
+```bash
+curl "$SERVE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $SERVE_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "qwen-0_5b",
+    "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
+    "max_tokens": 8,
+    "temperature": 0
+  }'
+```
+
+Stop it:
+
+```bash
+serve stop
+```
+
+## Service Routes
+
+The model commands are the fastest path for one model. Use service profiles
+when you want a reusable launch definition and a stable public route.
+
+Create a vLLM service profile:
+
+```bash
+curl -X POST "$SERVE_URL/admin/service-profiles" \
+  -H "Authorization: Bearer $SERVE_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "qwen-vllm",
+    "model_name": "qwen-vllm",
+    "hf_repo": "Qwen/Qwen2.5-0.5B-Instruct",
+    "backend": "vllm",
+    "gpu_ids": [0],
+    "max_model_len": 1024,
+    "target_concurrency": 4
+  }'
+```
+
+Deploy it:
+
+```bash
+curl -X POST "$SERVE_URL/admin/service-profiles/qwen-vllm/deploy" \
+  -H "Authorization: Bearer $SERVE_TOKEN"
+```
+
+Expose it as a public model name:
+
+```bash
+curl -X POST "$SERVE_URL/admin/routes" \
+  -H "Authorization: Bearer $SERVE_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "chat-default",
+    "match_model": "chat",
+    "profile_name": "qwen-vllm",
+    "priority": 10
+  }'
+```
+
+Call the route:
+
+```bash
+curl "$SERVE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $SERVE_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "chat",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "max_tokens": 64
+  }'
+```
+
+Switch `"backend": "vllm"` to `"backend": "sglang"` for the same profile shape
+on SGLang.
+
+## Concepts
+
+**Service**
+
+A runnable inference process. Today that is usually a vLLM, SGLang, or
+TensorRT-LLM container. Later it can be a local process or remote HTTP service.
+
+**Service profile**
+
+A saved launch definition: backend, image, model, args, GPU placement,
+concurrency, context length, and timeout policy.
+
+**Deployment**
+
+A running instance of a service profile. Deployments move through `pending`,
+`loading`, `ready`, `stopping`, `stopped`, and `failed`.
+
+**Route**
+
+A rule that maps an incoming request to a service profile. The first route type
+matches the OpenAI `model` field and rewrites it to the served model name.
+
+**Backend**
+
+The adapter that knows how to launch a specific engine. Engine-specific argv,
+ports, health paths, metrics paths, and memory headroom live behind this
+interface.
+
+**Driver**
+
+The mechanism that starts and stops services. Docker is the current driver.
+Process, remote HTTP, SSH, Slurm, or Kubernetes drivers can be added behind the
+same lifecycle contract.
 
 ## CLI
 
+```text
+serve doctor              check host requirements
+serve setup               first-run wizard
+serve daemon start        start the daemon
+serve daemon stop         stop the daemon
+serve daemon status       show daemon status
+serve pull <repo>         register and download model files
+serve ls                  list registered models
+serve run <name>          start a deployment
+serve pin <name>          keep a deployment loaded
+serve unpin <name>        allow idle eviction
+serve ps                  list deployments
+serve stop [<id>]         stop one deployment or all deployments
+serve top                 terminal dashboard
+serve logs                tail engine container logs
+serve key create          create an API key
+serve key list            list key prefixes
+serve key revoke <id>     revoke a key
+serve update-engines      check for newer pinned engine tags
 ```
-serve doctor              # check environment
-serve setup               # interactive first-run wizard
-serve daemon {start|stop|status}
-serve pull <repo>         # register + download weights
-serve ls                  # list registered models
-serve run <name>          # load a model
-serve pin <name>          # never auto-evict
-serve unpin <name>        # mark as LRU-evictable
-serve ps                  # list deployments
-serve stop [<id>]         # stop one or all
-serve top                 # live dashboard
-serve logs                # tail engine container
-serve key {create|list|revoke}
-serve update-engines      # check Docker Hub for newer pinned tags
+
+Useful `serve run` options:
+
+```text
+--engine vllm|sglang|trtllm
+--gpu 0
+--gpu 0,1
+--ctx 8192
+--max-seqs 32
+--idle-timeout 300
+--pin
+--image <image:tag>
+--extra '--some-engine-flag=value'
 ```
 
 ## Architecture
 
-```
-                       ┌──────────────────────────────────────┐
-                       │           serve daemon               │
-                       │  (FastAPI + uvicorn, async)          │
-                       │                                      │
-   client ──TCP──▶─────┤  /v1/chat/completions ─────┐         │
-                       │  /v1/completions            │         │
-                       │  /v1/embeddings             │         │
-                       │  /v1/models                 │         │
-                       │  /admin/*  (Bearer / UDS)   │         │
-                       │  /metrics                   │         │
-                       │  /admin/events  (SSE)       │         │
-                       │  /admin/gpus                │         │
-                       │  /  (web UI)                │         │
-                       │                             ▼         │
-   CLI ───UDS sock─────┤  service lifecycle ──┐  proxy router  │
-                       │  ↑   ↓               │     │          │
-                       │  ↑   reconcile/stop  │     │          │
-                       │  EventBus → SSE      │     │          │
-                       └───────────┼──────────┼─────┼──────────┘
-                                   │          │     │
-                                   ▼          ▼     ▼
-                          ┌────────────────────────────────┐
-                          │   Docker API (host socket)     │
-                          └────────────────────────────────┘
-                                   │
-                                   ▼
-                          ┌────────────────────────────────┐
-                          │  Runnable inference services   │
-                          │    vllm/vllm-openai            │
-                          │    lmsysorg/sglang             │
-                          │    tensorrt-llm/*              │
-                          │  bound to 127.0.0.1:<random>   │
-                          └────────────────────────────────┘
+```text
+client or SDK
+    |
+    | HTTP /v1/*
+    v
++------------------------------+
+| serve daemon                 |
+|                              |
+| OpenAI-compatible API        |
+| admin API                    |
+| auth and limits              |
+| router                       |
+| lifecycle manager            |
+| metrics and events           |
++------------------------------+
+    |
+    | Docker API
+    v
++------------------------------+
+| engine containers            |
+|                              |
+| vllm/vllm-openai             |
+| lmsysorg/sglang              |
+| tensorrt-llm                 |
++------------------------------+
 ```
 
-- **Daemon** runs on the host, single Python process, async end-to-end.
-- **Services** currently run as separate engine containers via the Docker API. The daemon talks to them over a host-bound random port (no shared-network hop, no DNS surprises).
-- **Router** currently maps OpenAI `model` names to ready deployments. The next abstraction layer generalizes this into explicit service profiles, route rules, and routing policy.
-- **State** lives in SQLite at `~/.serve/db.sqlite` (models, deployments, API keys, usage).
-- **Backend abstraction**: each engine is a `Backend` Protocol implementation; argv differences (`--model` vs `--model-path`, `--gpu-memory-utilization` vs `--mem-fraction-static`) live entirely inside the engine class.
-- **Manifest-driven**: image tags, internal ports, and engine-specific headroom constants come from `src/serve_engine/backends/backends.yaml`. Override per-host in `~/.serve/backends.override.yaml`.
+Runtime choices:
 
-## Direction
+- The daemon runs on the host as one async Python process.
+- Engine services run in separate containers.
+- Containers bind to random localhost ports.
+- The router only sends traffic to ready deployments.
+- State lives in SQLite under `~/.serve`.
+- Engine defaults come from `src/serve_engine/backends/backends.yaml`.
+- Per-host engine overrides live in `~/.serve/backends.override.yaml`.
 
-The product direction is a router/control-plane abstraction, with "model serving" as the first service family:
+## Files
 
-- **Service profiles:** saved launch definitions for vLLM, SGLang, TRT-LLM, llama.cpp, embedding servers, rerankers, or custom HTTP services.
-- **Route rules:** map model names, OpenAI endpoints, tenants, or custom paths to services.
-- **Routing policy:** health-gated routing first, then least-loaded, fallback, canary, queue-aware, and warm-only policies.
-- **Backpressure:** per-service concurrency caps, queue limits, timeouts, and predictable overload behavior.
-- **Autosuspend/autostart:** keep hot services ready, stop idle services, and optionally queue while a stopped service starts.
-- **Driver interface:** Docker first; process, remote HTTP, and cluster drivers can follow without changing the router.
+By default, serve-engine owns `~/.serve`. Override it with `SERVE_HOME`.
 
-## On-disk layout
-
-Everything the daemon owns lives under `~/.serve/` (override the parent via the `SERVE_HOME` env var):
-
-```
+```text
 ~/.serve/
-├── db.sqlite               state — models, deployments, adapters, usage,
-│                           api_keys, key_usage_events
-├── sock                    Unix-domain control socket (CLI ↔ daemon)
-├── logs/
-│   └── daemon.log          daemon stdout/stderr
-├── models/                 HuggingFace weight cache (one subdir per repo)
-│   └── models--<owner>--<repo>/snapshots/<rev>/…
-├── configs/                per-deployment engine YAMLs (TRT-LLM --config)
-│   └── <deployment_id>.yml
-├── predictor.yaml          optional — predictor tuning (enabled, tick_interval_s,
-│                           per-rule thresholds). Defaults applied if absent.
-└── backends.override.yaml  optional — pin different engine image tags / headroom
+|-- db.sqlite               models, deployments, profiles, routes, keys, usage
+|-- sock                    local CLI control socket
+|-- logs/
+|   `-- daemon.log          daemon stdout and stderr
+|-- models/                 downloaded Hugging Face model files
+|   `-- models--owner--repo/snapshots/revision/
+|-- configs/                per-deployment engine configs
+|-- predictor.yaml          optional prewarm and prediction tuning
+`-- backends.override.yaml  optional engine image and headroom overrides
 ```
 
-Adapter blobs live alongside model weights under `models/`.
+## Operations Notes
 
-## Tested performance
+- Run `serve doctor` before debugging anything else.
+- Use `serve ps` for deployment state.
+- Use `serve logs` when an engine fails to become healthy.
+- Use `/admin/events` or `serve top` for lifecycle visibility.
+- Use `--pin` for services that should stay loaded.
+- Use `--idle-timeout` for services that should leave the GPU when quiet.
+- Use service profiles when launch arguments need to be repeatable.
+- Use routes when the public model name should not be tied to one backend.
 
-Single H100 80GB, Qwen2.5 0.5B and 1.5B, 512-token outputs, Poisson arrivals (raw JSON in `docs/bench/`):
+## Performance Snapshot
 
-| QPS | Model/Engine | Agg TPS | TTFT p50 (ms) | E2E p50 (ms) |
+Single H100 80 GB, Qwen2.5 0.5B and 1.5B, 512-token outputs, Poisson arrivals.
+Raw benchmark JSON lives in `docs/bench/`.
+
+| QPS | Model and Engine | Agg TPS | TTFT p50 ms | E2E p50 ms |
 |---:|---|---:|---:|---:|
-| 1 | 0.5B/vllm | 355 | 25 | 1134 |
-| 16 | 0.5B/vllm | 7 169 | 33 | 1429 |
-| 32 | 0.5B/sglang | **14 751** | 68 | 1280 |
-| 16 | 1.5B/sglang | 7 904 | 38 | 1608 |
-| 32 | 1.5B/vllm | 13 377 | 128 | 2814 |
+| 1 | 0.5B vLLM | 355 | 25 | 1134 |
+| 16 | 0.5B vLLM | 7169 | 33 | 1429 |
+| 32 | 0.5B SGLang | 14751 | 68 | 1280 |
+| 16 | 1.5B SGLang | 7904 | 38 | 1608 |
+| 32 | 1.5B vLLM | 13377 | 128 | 2814 |
 
-Engine saturation on the small Qwens is ~14k tokens/sec aggregate.
+Treat these as a sanity check, not a universal benchmark. Engine version, model
+family, context length, quantization, and GPU all matter.
 
-## Design docs and plans
+## Design Docs
 
 Current direction:
 
-- Service router and lifecycle control plane — `docs/design/specs/2026-05-14-service-router-control-plane.md`
+- `docs/design/specs/2026-05-14-service-router-control-plane.md`
 
-Historical implementation plans live in `docs/design/plans/` plus earlier specs in `docs/design/specs/`. Some older v2 notes discuss adapter-first and snapshot-first directions; those are retained as history and are superseded by the service-router direction.
-
-- Plan 01 — walking skeleton (daemon + CLI + vLLM container)
-- Plan 02 — multi-model lifecycle (pin / auto-swap / KV-aware placement)
-- Plan 03 — SGLang backend
-- Plan 04 — API keys + multi-window rate limits
-- Plan 05 — observability (`/metrics`, SSE events, `serve top`)
-- Plan 06 — web UI (Vite + React + Tailwind, bundled)
-- Plan 07 — `serve doctor` + installer + daemon-as-container
-- Plan 08 — hardening pass (crash recovery, proxy status forwarding, real `pull` download, etc.)
+Historical implementation notes live in `docs/design/plans/` and older files
+under `docs/design/specs/`. Adapter-first and snapshot-first notes are retained
+as history. The current direction is service routing and lifecycle control.
 
 ## Development
 
 ```bash
-uv venv && source .venv/bin/activate
+uv venv
+source .venv/bin/activate
 uv pip install -e ".[dev]"
-pytest tests/unit         # 331 unit tests in the current tree
+pytest tests/unit
 ruff check src/ tests/
-
-# UI dev (optional — repo ships pre-built dist)
-cd ui && npm install && npm run build
 ```
 
-## Out of scope (v1)
+UI build:
 
-- Multi-node distributed serving (you have ≥8 GPUs and want tensor-parallel across hosts → use vLLM directly).
-- Fine-tuning / training (inference-only).
-- Autotune (model → optimal TP / dtype / context auto-pick). The KV estimator + manifest-driven headroom does most of the painful tuning; full autotune is parked.
-- Built-in TLS. Bind to `127.0.0.1` and put a reverse proxy in front for external access.
+```bash
+cd ui
+npm install
+npm run build
+```
+
+## Out Of Scope For V1
+
+- Multi-host tensor parallel inference
+- Training or fine-tuning
+- Full autotuning of tensor parallelism, dtype, and context length
+- Built-in TLS termination
+- A Kubernetes replacement
+
+Bind to `127.0.0.1` by default. Put a reverse proxy in front when exposing it
+outside the host.
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).
