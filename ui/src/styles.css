@@ -159,7 +159,7 @@
   }
 
   .caret::after {
-    content: '▍';
+    content: '|';
     color: var(--accent);
     margin-left: 6px;
     font-weight: 400;
@@ -174,7 +174,7 @@
     to   { opacity: 1; transform: translateY(0); }
   }
 
-  /* Bare-bones data table — hairline rules only, no chrome. */
+  /* Data table with hairline rules only. */
   .ditable { width: 100%; border-collapse: collapse; }
   .ditable thead th {
     text-align: left;

@@ -1,7 +1,6 @@
-"""serve adapter — register/download/load/unload LoRA adapters.
+"""Register, download, load, and unload LoRA adapters.
 
-Mirrors the design in
-docs/design/specs/2026-05-13-adapter-lifecycle-design.md §4.
+See docs/design/specs/2026-05-13-adapter-lifecycle-design.md.
 """
 from __future__ import annotations
 
@@ -80,7 +79,7 @@ def adapter_pull(
         typer.echo(
             f"note: adapter has lora_rank={rank}; the target deployment "
             f"must be started with -x '--max-lora-rank={rank}' (or higher) "
-            f"— vLLM/SGLang default to 16."
+            f"because vLLM/SGLang default to 16."
         )
 
 
@@ -130,7 +129,7 @@ def adapter_add(
         typer.echo(
             f"note: adapter has lora_rank={rank}; the target deployment "
             f"must be started with -x '--max-lora-rank={rank}' (or higher) "
-            f"— vLLM/SGLang default to 16."
+            f"because vLLM/SGLang default to 16."
         )
 
 

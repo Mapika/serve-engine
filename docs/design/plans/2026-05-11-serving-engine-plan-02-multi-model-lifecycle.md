@@ -1,10 +1,10 @@
-# Serving Engine — Plan 02: Multi-Model Lifecycle
+# Serving Engine - Plan 02: Multi-Model Lifecycle
 
 **Goal:** Lift Plan 01's single-deployment restriction. The daemon now hosts N concurrent deployments, with explicit pin/auto-swap semantics, GPU-topology-aware placement, KV-cache-aware VRAM accounting, and LRU/idle eviction.
 
-**Architecture:** Add a placement layer between the lifecycle manager and the Docker client. The manager no longer "stops the previous" — it asks placement for a GPU set, evicting auto deployments as needed. Routing changes from "find_active" to "find by model name." Pinned deployments are immune to eviction; auto deployments age out by idle timeout or get evicted to make room.
+**Architecture:** Add a placement layer between the lifecycle manager and the Docker client. The manager no longer "stops the previous" - it asks placement for a GPU set, evicting auto deployments as needed. Routing changes from "find_active" to "find by model name." Pinned deployments are immune to eviction; auto deployments age out by idle timeout or get evicted to make room.
 
-**Tech Stack:** Same as Plan 01 (Python 3.11+, FastAPI, Typer, sqlite3, docker-py, huggingface_hub) plus `pynvml` for GPU enumeration. No new third-party deps required for the placement / KV-cache math — pure Python.
+**Tech Stack:** Same as Plan 01 (Python 3.11+, FastAPI, Typer, sqlite3, docker-py, huggingface_hub) plus `pynvml` for GPU enumeration. No new third-party deps required for the placement / KV-cache math - pure Python.
 
 **Explicitly NOT in this plan:** autotune (Plan 03), SGLang backend (Plan 04), API keys / fair queueing (Plan 05), metrics aggregation / `serve top` (Plan 06), web UI (Plan 07), doctor / install scripts (Plan 08).
 
@@ -14,35 +14,35 @@
 
 ```
 serving-engine/
-├── src/serve_engine/
-│   ├── store/
-│   │   ├── deployments.py           # MODIFIED — new columns, new queries
-│   │   ├── migrations/
-│   │   │   └── 002_multi_deployment.sql   # NEW
-│   ├── lifecycle/
-│   │   ├── topology.py              # NEW — GPU enumeration & NVLink islands
-│   │   ├── kv_estimator.py          # NEW — read config.json, compute KV bytes/token
-│   │   ├── placement.py             # NEW — placement algorithm
-│   │   ├── reaper.py                # NEW — idle-eviction background task
-│   │   └── manager.py               # MODIFIED — N deployments, pin, eviction
-│   ├── daemon/
-│   │   ├── admin.py                 # MODIFIED — pin/unpin, ps with new columns
-│   │   ├── app.py                   # MODIFIED — start reaper on startup
-│   │   ├── __main__.py              # MODIFIED — pass topology to manager
-│   │   └── openai_proxy.py          # MODIFIED — find_by_model_name, touch last_request_at
-│   └── cli/
-│       ├── pin_cmd.py               # NEW
-│       ├── unpin_cmd.py             # NEW
-│       ├── ps_cmd.py                # MODIFIED — new columns
-│       ├── run_cmd.py               # MODIFIED — --pin and --idle-timeout flags
-│       └── __init__.py              # MODIFIED — register new commands
-└── tests/
-    └── unit/
-        ├── test_kv_estimator.py     # NEW
-        ├── test_placement.py        # NEW
-        ├── test_reaper.py           # NEW
-        ├── test_lifecycle_manager.py  # MODIFIED — new scenarios
-        └── test_admin_endpoints.py  # MODIFIED — pin/unpin/multi-deployment
+|-- src/serve_engine/
+|   |-- store/
+|   |   |-- deployments.py           # MODIFIED - new columns, new queries
+|   |   |-- migrations/
+|   |   |   +-- 002_multi_deployment.sql   # NEW
+|   |-- lifecycle/
+|   |   |-- topology.py              # NEW - GPU enumeration & NVLink islands
+|   |   |-- kv_estimator.py          # NEW - read config.json, compute KV bytes/token
+|   |   |-- placement.py             # NEW - placement algorithm
+|   |   |-- reaper.py                # NEW - idle-eviction background task
+|   |   +-- manager.py               # MODIFIED - N deployments, pin, eviction
+|   |-- daemon/
+|   |   |-- admin.py                 # MODIFIED - pin/unpin, ps with new columns
+|   |   |-- app.py                   # MODIFIED - start reaper on startup
+|   |   |-- __main__.py              # MODIFIED - pass topology to manager
+|   |   +-- openai_proxy.py          # MODIFIED - find_by_model_name, touch last_request_at
+|   +-- cli/
+|       |-- pin_cmd.py               # NEW
+|       |-- unpin_cmd.py             # NEW
+|       |-- ps_cmd.py                # MODIFIED - new columns
+|       |-- run_cmd.py               # MODIFIED - --pin and --idle-timeout flags
+|       +-- __init__.py              # MODIFIED - register new commands
++-- tests/
+    +-- unit/
+        |-- test_kv_estimator.py     # NEW
+        |-- test_placement.py        # NEW
+        |-- test_reaper.py           # NEW
+        |-- test_lifecycle_manager.py  # MODIFIED - new scenarios
+        +-- test_admin_endpoints.py  # MODIFIED - pin/unpin/multi-deployment
 ```
 
 ---
@@ -207,7 +207,7 @@ def test_list_evictable_sorts_lru(tmp_path):
     dep_store.touch_last_request(conn, db)
 
     rows = dep_store.list_evictable(conn)
-    assert [r.id for r in rows] == [dc, db]  # LRU: dc touched first → most-evictable
+    assert [r.id for r in rows] == [dc, db]  # LRU: dc touched first -> most-evictable
     assert da not in [r.id for r in rows]
 
 
@@ -234,7 +234,7 @@ Expected: all existing tests pass + 3 new pass.
 
 ```bash
 git add src/serve_engine/store/migrations/002_multi_deployment.sql src/serve_engine/store/deployments.py tests/unit/test_store.py
-git commit -m "feat(store): schema 002 — pinned, idle_timeout, vram_reserved, container_address"
+git commit -m "feat(store): schema 002 - pinned, idle_timeout, vram_reserved, container_address"
 ```
 
 ---
@@ -260,7 +260,7 @@ Notes:
 - `head_dim = hidden_size // num_attention_heads` if not explicit.
 - `num_key_value_heads` defaults to `num_attention_heads` if missing (older models without GQA).
 - `num_parameters` is read from `safetensors_total_size / dtype_bytes` if not present; otherwise estimated as `12 * num_hidden_layers * hidden_size**2` (rough but good enough for placement).
-- `dtype_bytes`: bf16/fp16 → 2, fp8 → 1, auto → 2 (default to bf16).
+- `dtype_bytes`: bf16/fp16 -> 2, fp8 -> 1, auto -> 2 (default to bf16).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -300,13 +300,13 @@ def test_estimate_basic(tmp_path):
     )
     mb = estimate_vram_mb(inp)
     assert mb > 0
-    # For 24 layers × 16 kv_heads × (1024/16=64) head_dim × 2 bytes
-    # = 49,152 bytes per token. ×4096 ctx ×8 concurrency = ~1.5 GB just KV.
+    # For 24 layers x 16 kv_heads x (1024/16=64) head_dim x 2 bytes
+    # = 49,152 bytes per token. x4096 ctx x8 concurrency = ~1.5 GB just KV.
     assert 1000 < mb < 10000
 
 
 def test_estimate_handles_gqa(tmp_path):
-    # GQA: kv_heads < attention_heads → smaller KV
+    # GQA: kv_heads < attention_heads -> smaller KV
     full = _write_config(tmp_path)
     full_mb = estimate_vram_mb(
         KVEstimateInput(model_dir=full, max_model_len=4096,
@@ -339,7 +339,7 @@ def test_read_model_config_missing_file_raises(tmp_path):
 
 - [ ] **Step 2: Run and confirm failure**
 
-`pytest tests/unit/test_kv_estimator.py -v` → FAIL (module missing).
+`pytest tests/unit/test_kv_estimator.py -v` -> FAIL (module missing).
 
 - [ ] **Step 3: Implement `src/serve_engine/lifecycle/kv_estimator.py`**
 
@@ -416,7 +416,7 @@ def estimate_vram_mb(inp: KVEstimateInput) -> int:
 
 - [ ] **Step 4: Run tests**
 
-`pytest tests/unit/test_kv_estimator.py -v` → 4 pass.
+`pytest tests/unit/test_kv_estimator.py -v` -> 4 pass.
 
 - [ ] **Step 5: Commit**
 
@@ -484,7 +484,7 @@ def test_read_topology_no_nvlink(mock_nvml):
 
 - [ ] **Step 2: Run, confirm failure**
 
-`pytest tests/unit/test_topology.py -v` → FAIL.
+`pytest tests/unit/test_topology.py -v` -> FAIL.
 
 - [ ] **Step 3: Implement `src/serve_engine/lifecycle/topology.py`**
 
@@ -560,7 +560,7 @@ def _build_islands(count: int) -> dict[int, frozenset[int]]:
 def read_topology() -> Topology:
     """Enumerate GPUs and detect NVLink islands. Cached for the process lifetime."""
     if pynvml is None:
-        log.warning("pynvml unavailable — no GPUs visible")
+        log.warning("pynvml unavailable - no GPUs visible")
         return Topology(gpus=[], _islands={})
 
     pynvml.nvmlInit()
@@ -618,7 +618,7 @@ Given (topology, currently-allocated deployments, requested deployment shape wit
 - A `NoRoom` error.
 
 Algorithm:
-1. Compute `available_mb[gpu_id] = total_mb − sum(reserved_mb of allocated deployments on this gpu)`.
+1. Compute `available_mb[gpu_id] = total_mb - sum(reserved_mb of allocated deployments on this gpu)`.
 2. Find an NVLink-island-aligned subset of free GPUs of size `tp`. If found, return `Fit`.
 3. Otherwise, consider evictions: walk `list_evictable` (LRU order) and "subtract" their reservations. After each subtraction, retry step 2. First success wins.
 4. If no eviction sequence works, return `NoRoom`.
@@ -684,7 +684,7 @@ def test_evict_then_fit_lru_first():
     req = PlacementRequest(
         tensor_parallel=1, vram_reserved_mb=70_000, model_name="x",
     )
-    # GPU 1 is free → fit there directly
+    # GPU 1 is free -> fit there directly
     decision = plan_placement(topo, allocated=alloc, request=req)
     assert isinstance(decision, Fit)
     assert decision.gpu_ids == [1]
@@ -695,7 +695,7 @@ def test_evict_then_fit_lru_first():
     ]
     decision = plan_placement(topo, allocated=alloc2, request=req)
     assert isinstance(decision, EvictThenFit)
-    # LRU comes first: id=1 was added first → it's the LRU here (caller orders list)
+    # LRU comes first: id=1 was added first -> it's the LRU here (caller orders list)
     assert decision.evict_ids == [1]
     assert decision.gpu_ids == [0]
 
@@ -861,7 +861,7 @@ git commit -m "feat(lifecycle): topology-aware placement with LRU eviction"
 
 ---
 
-## Task 5: LifecycleManager refactor — multi-deployment
+## Task 5: LifecycleManager refactor - multi-deployment
 
 **Files:**
 - Modify: `src/serve_engine/lifecycle/manager.py`
@@ -873,7 +873,7 @@ The manager now:
 3. Persists `vram_reserved_mb` (via KV estimator) and `container_address` (from `ContainerHandle`).
 4. Exposes a public `docker_client` accessor (`mgr.docker` property).
 5. Adds a `pin(dep_id, pinned: bool)` method.
-6. `stop(dep_id: int | None)` — stops a specific deployment, or all if `dep_id is None`.
+6. `stop(dep_id: int | None)` - stops a specific deployment, or all if `dep_id is None`.
 
 **Important:** `DeploymentPlan` gains two new optional fields (`pinned`, `idle_timeout_s`). Keep backward compat: defaults `pinned=False`, `idle_timeout_s=None`.
 
@@ -891,7 +891,7 @@ In `src/serve_engine/lifecycle/plan.py`, add fields after `extra_args`:
 
 - [ ] **Step 2: Rewrite `LifecycleManager.load`**
 
-The full new `manager.py` (replace the existing `LifecycleManager` class — keep the module-level `wait_healthy` and `download_model_async` functions as they are):
+The full new `manager.py` (replace the existing `LifecycleManager` class - keep the module-level `wait_healthy` and `download_model_async` functions as they are):
 
 ```python
 class LifecycleManager:
@@ -1069,7 +1069,7 @@ from dataclasses import replace
 from serve_engine.lifecycle.topology import Topology
 ```
 
-The `set_container` call now passes `container_address=handle.address` — that requires updating `dep_store.set_container` (done in Task 1).
+The `set_container` call now passes `container_address=handle.address` - that requires updating `dep_store.set_container` (done in Task 1).
 
 - [ ] **Step 3: Update `set_container` signature**
 
@@ -1105,7 +1105,7 @@ In `tests/unit/test_lifecycle_manager.py`:
 - Inject a topology fixture (`Topology(gpus=[GPUInfo(0, "H100", 80_000)], _islands={0: frozenset({0})})`).
 - Pass `topology=...` to every `LifecycleManager` constructor call.
 - Patch `serve_engine.lifecycle.manager.estimate_vram_mb` to return a fixed value (e.g. 20_000) so tests don't depend on disk config.json files.
-- `test_load_stops_previous_deployment` becomes `test_load_evicts_previous_when_room_constrained` — set the topology to have only one GPU, the first load occupies it, the second forces eviction.
+- `test_load_stops_previous_deployment` becomes `test_load_evicts_previous_when_room_constrained` - set the topology to have only one GPU, the first load occupies it, the second forces eviction.
 
 Concrete test additions:
 
@@ -1161,7 +1161,7 @@ def test_load_evicts_previous_when_room_constrained(conn, monkeypatch, tmp_path,
         "serve_engine.lifecycle.manager.download_model_async",
         AsyncMock(return_value=str(tmp_path / "weights")),
     )
-    # 60 GB per deployment, 80 GB total → can only fit one at a time
+    # 60 GB per deployment, 80 GB total -> can only fit one at a time
     monkeypatch.setattr(
         "serve_engine.lifecycle.manager.estimate_vram_mb",
         lambda inp: 60 * 1024,
@@ -1409,7 +1409,7 @@ def models(request: Request):
 
 - [ ] **Step 3: Update integration test**
 
-In `tests/integration/test_openai_proxy.py`, the existing `test_proxy_streams_response` should still pass — the `model` field is already in the request body. But the deployment in the fixture must have `container_address="127.0.0.1"`. The admin POST in the fixture should already set that via the manager's `set_container` call after Task 5's change.
+In `tests/integration/test_openai_proxy.py`, the existing `test_proxy_streams_response` should still pass - the `model` field is already in the request body. But the deployment in the fixture must have `container_address="127.0.0.1"`. The admin POST in the fixture should already set that via the manager's `set_container` call after Task 5's change.
 
 Add a new test:
 ```python
@@ -1476,13 +1476,13 @@ from serve_engine.lifecycle.reaper import Reaper
 async def test_reaper_evicts_idle():
     now = 1_000_000
     deployments = [
-        # idle 600s; default timeout 300 → evict
+        # idle 600s; default timeout 300 -> evict
         MagicMock(id=1, pinned=False, idle_timeout_s=None,
                   last_request_at=now - 600, status="ready"),
-        # idle 100s; default timeout 300 → keep
+        # idle 100s; default timeout 300 -> keep
         MagicMock(id=2, pinned=False, idle_timeout_s=None,
                   last_request_at=now - 100, status="ready"),
-        # pinned → keep regardless
+        # pinned -> keep regardless
         MagicMock(id=3, pinned=True, idle_timeout_s=None,
                   last_request_at=now - 10_000, status="ready"),
     ]
@@ -1506,10 +1506,10 @@ async def test_reaper_evicts_idle():
 async def test_reaper_respects_per_deployment_timeout():
     now = 1_000_000
     deployments = [
-        # idle 100s; per-deployment 60 → evict
+        # idle 100s; per-deployment 60 -> evict
         MagicMock(id=1, pinned=False, idle_timeout_s=60,
                   last_request_at=now - 100, status="ready"),
-        # idle 100s; per-deployment 600 → keep
+        # idle 100s; per-deployment 600 -> keep
         MagicMock(id=2, pinned=False, idle_timeout_s=600,
                   last_request_at=now - 100, status="ready"),
     ]
@@ -1827,7 +1827,7 @@ def pin(model_name: str = typer.Argument(...)):
     """Mark the deployment for <model_name> as pinned (never auto-evicted)."""
     deps = asyncio.run(ipc.get(config.SOCK_PATH, "/admin/deployments"))
     matches = [d for d in deps if d.get("model_id")]  # we'll filter by model below
-    # We need model_id → name mapping; fetch models
+    # We need model_id -> name mapping; fetch models
     models = asyncio.run(ipc.get(config.SOCK_PATH, "/admin/models"))
     model = next((m for m in models if m["name"] == model_name), None)
     if model is None:
@@ -1842,7 +1842,7 @@ def pin(model_name: str = typer.Argument(...)):
     typer.echo(f"pinned deployment #{dep_id} ({model_name})")
 ```
 
-- [ ] **Step 2: `unpin_cmd.py`** — same shape, calls `/unpin` endpoint instead, message says "unpinned".
+- [ ] **Step 2: `unpin_cmd.py`** - same shape, calls `/unpin` endpoint instead, message says "unpinned".
 
 ```python
 from __future__ import annotations
@@ -1994,7 +1994,7 @@ The v2 script:
 3. Runs it with `--pin`.
 4. Pulls `Qwen/Qwen2.5-1.5B-Instruct` as `qwen-1_5b`.
 5. Runs it with `--idle-timeout 60`.
-6. Calls `/v1/chat/completions` against both models (different `model` field) — both should succeed because the proxy now routes by model name.
+6. Calls `/v1/chat/completions` against both models (different `model` field) - both should succeed because the proxy now routes by model name.
 7. Verifies via `serve ps` that both deployments are `ready`.
 
 - [ ] **Step 1: Replace `scripts/smoke_e2e.sh`**
@@ -2055,8 +2055,8 @@ git commit -m "test: Plan 02 smoke (pin + auto-swap + multi-model routing)"
 
 After all tasks:
 
-1. `pytest -v` — all unit + integration tests pass with no GPU.
-2. `ruff check src/ tests/` — clean.
+1. `pytest -v` - all unit + integration tests pass with no GPU.
+2. `ruff check src/ tests/` - clean.
 3. On real hardware (8 H100 / 1 H100): `bash scripts/smoke_e2e.sh` exits 0 and prints `PASS`.
 
 ---
@@ -2064,7 +2064,7 @@ After all tasks:
 ## Self-review
 
 - **Spec coverage:** Pin/auto-swap (T1, T5, T9, T10), idle eviction (T8), GPU topology (T3, T6), placement (T4, T5), KV-aware reservation (T2, T5), routing by model name (T7), container address persisted (T1, T7), public docker accessor (T5).
-- **No autotune, no SGLang, no multi-tenancy, no UI** — correctly deferred to later plans.
-- **Placeholder scan:** none — every code step has full code.
-- **Type consistency:** `Deployment.gpu_ids: list[int]`, `Deployment.pinned: bool`, `ContainerHandle.address: str`, `Topology.gpus: list[GPUInfo]`, `PlacementRequest.tensor_parallel: int`, `Fit.gpu_ids: list[int]` — names used identically across tasks.
+- **No autotune, no SGLang, no multi-tenancy, no UI** - correctly deferred to later plans.
+- **Placeholder scan:** none - every code step has full code.
+- **Type consistency:** `Deployment.gpu_ids: list[int]`, `Deployment.pinned: bool`, `ContainerHandle.address: str`, `Topology.gpus: list[GPUInfo]`, `PlacementRequest.tensor_parallel: int`, `Fit.gpu_ids: list[int]` - names used identically across tasks.
 - **Forward-compat:** `target_concurrency` and `idle_timeout_s` on `DeploymentPlan` give Plan 03 (autotune) and Plan 06 (observability) somewhere to land.

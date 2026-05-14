@@ -1,7 +1,7 @@
 """usage_aggregates store + rollup_old_events.
 
 Schema: migration 008.
-Semantics: bounded storage — events older than retention land in
+Semantics: bounded storage - events older than retention land in
 (base, adapter, hour_of_week) buckets here and the raw rows go away.
 """
 from __future__ import annotations
@@ -91,7 +91,7 @@ def test_rollup_old_events_aggregates_and_deletes(tmp_path):
 
 
 def test_rollup_old_events_is_noop_on_empty_window(tmp_path):
-    """No events older than cutoff → zero work, both counters zero."""
+    """No events older than cutoff -> zero work, both counters zero."""
     conn = _fresh(tmp_path)
     fresh_ts = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
     _insert_event(conn, ts=fresh_ts, base="m")

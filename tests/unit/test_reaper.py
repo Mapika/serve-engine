@@ -10,13 +10,13 @@ from serve_engine.lifecycle.reaper import Reaper
 async def test_reaper_evicts_idle():
     now = 1_000_000
     deployments = [
-        # idle 600s; default timeout 300 → evict
+        # idle 600s; default timeout 300 -> evict
         MagicMock(id=1, pinned=False, idle_timeout_s=None,
                   last_request_at=now - 600, status="ready"),
-        # idle 100s; default timeout 300 → keep
+        # idle 100s; default timeout 300 -> keep
         MagicMock(id=2, pinned=False, idle_timeout_s=None,
                   last_request_at=now - 100, status="ready"),
-        # pinned → keep regardless
+        # pinned -> keep regardless
         MagicMock(id=3, pinned=True, idle_timeout_s=None,
                   last_request_at=now - 10_000, status="ready"),
     ]
@@ -40,10 +40,10 @@ async def test_reaper_evicts_idle():
 async def test_reaper_respects_per_deployment_timeout():
     now = 1_000_000
     deployments = [
-        # idle 100s; per-deployment 60 → evict
+        # idle 100s; per-deployment 60 -> evict
         MagicMock(id=1, pinned=False, idle_timeout_s=60,
                   last_request_at=now - 100, status="ready"),
-        # idle 100s; per-deployment 600 → keep
+        # idle 100s; per-deployment 600 -> keep
         MagicMock(id=2, pinned=False, idle_timeout_s=600,
                   last_request_at=now - 100, status="ready"),
     ]

@@ -1,9 +1,8 @@
--- Sub-project A (v2): adapter-first lifecycle.
+-- Adapter registry and per-deployment adapter state.
 -- Adapters (LoRA / DoRA) are first-class entities tied to a base model.
 -- Junction table tracks which adapters are loaded into which deployments.
 -- New columns on `deployments` track LoRA capacity. Federation-ready
--- columns (source_peer_id, updated_at) populated NULL/local-time until
--- Sub-project D wires sync.
+-- columns (source_peer_id, updated_at) are reserved for future sync.
 
 CREATE TABLE IF NOT EXISTS adapters (
     id              INTEGER PRIMARY KEY,
@@ -14,7 +13,7 @@ CREATE TABLE IF NOT EXISTS adapters (
     local_path      TEXT,
     size_mb         INTEGER,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- Federation-ready (Sub-project D will populate):
+    -- Future peer sync fields:
     source_peer_id  TEXT,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

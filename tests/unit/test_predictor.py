@@ -71,13 +71,13 @@ def test_hour_of_week_matches_sqlite_strftime():
     """The Python helper must agree with SQLite's strftime('%w','%H')
     so the time-of-day rule's SQL filter and the Python now-computation
     pick the same bucket."""
-    # Sunday 2026-05-10 14:35 UTC → SQLite weekday=0, hour=14 → 14
+    # Sunday 2026-05-10 14:35 UTC -> SQLite weekday=0, hour=14 -> 14
     dt = datetime(2026, 5, 10, 14, 35, tzinfo=UTC)  # Sunday
     assert _hour_of_week(dt) == 14
-    # Monday 00:00 UTC → 24
+    # Monday 00:00 UTC -> 24
     dt = datetime(2026, 5, 11, 0, 0, tzinfo=UTC)
     assert _hour_of_week(dt) == 24
-    # Saturday 23:59 UTC → 6*24 + 23 = 167 (last bucket)
+    # Saturday 23:59 UTC -> 6*24 + 23 = 167 (last bucket)
     dt = datetime(2026, 5, 16, 23, 59, tzinfo=UTC)
     assert _hour_of_week(dt) == 167
 
@@ -89,7 +89,7 @@ def test_time_of_day_returns_models_active_in_next_hour(tmp_path):
     becomes a candidate; the rule pre-warms for the upcoming hour."""
     conn = _fresh(tmp_path)
     # Pin "now" so the predictor looks at the same bucket we seed.
-    fake_now = datetime(2026, 5, 11, 13, 30, tzinfo=UTC)  # Mon 13:30 → next 14:00
+    fake_now = datetime(2026, 5, 11, 13, 30, tzinfo=UTC)  # Mon 13:30 -> next 14:00
     # 4 events at Mon 14:xx across the past 4 weeks, all for the same model.
     for week in range(4):
         ts = fake_now - timedelta(days=7 * week) + timedelta(minutes=50)
@@ -141,7 +141,7 @@ def test_time_of_day_ignores_events_outside_retention(tmp_path):
 # ---- Rule 2: sequencing ----
 
 def test_sequencing_emits_candidate_when_p_exceeds_threshold(tmp_path):
-    """If Y follows X within window in ≥30% of historical X events,
+    """If Y follows X within window in >=30% of historical X events,
     Y is a candidate when X just fired."""
     conn = _fresh(tmp_path)
     fake_now = datetime(2026, 5, 11, 12, 0, tzinfo=UTC)
@@ -175,7 +175,7 @@ def test_sequencing_emits_candidate_when_p_exceeds_threshold(tmp_path):
 
 
 def test_sequencing_returns_empty_when_no_recent_trigger(tmp_path):
-    """No event in the last window_s → no sequencing candidates."""
+    """No event in the last window_s -> no sequencing candidates."""
     conn = _fresh(tmp_path)
     fake_now = datetime(2026, 5, 11, 12, 0, tzinfo=UTC)
     _insert(conn, ts=fake_now - timedelta(minutes=5), base="x")
@@ -240,7 +240,7 @@ def test_key_affinity_returns_top_k_for_active_keys(tmp_path):
     cands = p.candidates()
     names = {c.base_name for c in cands}
     assert names == {"a", "b"}  # top 2; c excluded
-    # `a` is the heaviest → score=1.0 (normalized to per-key max).
+    # `a` is the heaviest -> score=1.0 (normalized to per-key max).
     by_name = {c.base_name: c for c in cands}
     assert by_name["a"].score == 1.0
     assert by_name["b"].score < 1.0
@@ -250,7 +250,7 @@ def test_key_affinity_ignores_idle_keys(tmp_path):
     """Keys with no event in the last idle_seconds contribute nothing."""
     conn = _fresh(tmp_path)
     fake_now = datetime(2026, 5, 11, 12, 0, tzinfo=UTC)
-    # Key 42 fired 1 hour ago — well outside idle_seconds=300.
+    # Key 42 fired 1 hour ago - well outside idle_seconds=300.
     _insert(conn, ts=fake_now - timedelta(hours=1), base="x", api_key_id=42)
     p = Predictor(
         conn,
@@ -324,7 +324,7 @@ def test_empty_db_returns_empty_candidates(tmp_path):
 
 
 def test_disabled_rule_contributes_nothing(tmp_path):
-    """If a rule is disabled it must not even be queried — verified via
+    """If a rule is disabled it must not even be queried - verified via
     no candidates surfacing from data the rule would otherwise match."""
     conn = _fresh(tmp_path)
     fake_now = datetime(2026, 5, 11, 13, 30, tzinfo=UTC)
@@ -362,7 +362,7 @@ def test_candidate_key_separates_base_from_adapter(tmp_path):
 
 
 def test_candidate_key_property_round_trips():
-    """Candidate.key collapses (base, adapter) for dedupe — both branches."""
+    """Candidate.key collapses (base, adapter) for dedupe - both branches."""
     c1 = Candidate(base_name="a", adapter_name=None, score=0.1, reason="r")
     c2 = Candidate(base_name="a", adapter_name="x", score=0.1, reason="r")
     assert c1.key == ("a", None)

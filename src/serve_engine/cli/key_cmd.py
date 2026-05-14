@@ -24,12 +24,12 @@ def create(
     typer.echo(f"name:   {result['name']}")
     typer.echo(f"tier:   {result['tier']}")
     typer.echo(f"secret: {result['secret']}")
-    typer.echo("(save this secret now — it won't be shown again)")
+    typer.echo("(save this secret now; it won't be shown again)")
 
 
 @key_app.command("list")
 def list_keys(json_out: bool = typer.Option(False, "--json")):
-    """List API keys (prefixes only — secrets are never shown)."""
+    """List API keys. Secrets are never shown."""
     keys = asyncio.run(ipc.get(config.SOCK_PATH, "/admin/keys"))
     if json_out:
         typer.echo(json.dumps(keys, indent=2))

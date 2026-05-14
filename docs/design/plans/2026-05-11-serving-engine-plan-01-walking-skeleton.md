@@ -1,8 +1,8 @@
-# Serving Engine — Plan 01: Walking Skeleton
+# Serving Engine - Plan 01: Walking Skeleton
 
 **Goal:** Build a single-model serving daemon: user can `serve daemon start`, `serve pull meta-llama/Llama-3.2-1B-Instruct`, `serve run meta-llama/Llama-3.2-1B-Instruct`, and then hit `POST /v1/chat/completions` and receive a streamed response from a vLLM container that the daemon spawned and supervises.
 
-**Architecture:** Python daemon (FastAPI + uvicorn) that exposes a public TCP port for inference requests and a Unix domain socket for CLI commands. The daemon supervises exactly one vLLM container at a time, talking to it over Docker's bridge network. Persistent state in SQLite. CLI (Typer) is a thin HTTP-over-UDS client. No auth, no multi-model, no autotune in this plan — those come in Plans 02–05.
+**Architecture:** Python daemon (FastAPI + uvicorn) that exposes a public TCP port for inference requests and a Unix domain socket for CLI commands. The daemon supervises exactly one vLLM container at a time, talking to it over Docker's bridge network. Persistent state in SQLite. CLI (Typer) is a thin HTTP-over-UDS client. No auth, no multi-model, no autotune in this plan - those come in Plans 02-05.
 
 **Tech Stack:** Python 3.11+, FastAPI, uvicorn, httpx (async, UDS-capable), Typer, docker-py, huggingface_hub, structlog, pytest, pytest-asyncio. `uv` for packaging. Docker 24+ with `nvidia-container-toolkit` on the host. Upstream `vllm/vllm-openai` image.
 
@@ -14,53 +14,53 @@
 
 ```
 serving-engine/
-├── pyproject.toml
-├── README.md
-├── src/serve_engine/
-│   ├── __init__.py
-│   ├── config.py                       # paths (~/.serve), constants
-│   ├── store/
-│   │   ├── __init__.py
-│   │   ├── db.py                       # sqlite3 connection, migration runner
-│   │   ├── migrations/001_initial.sql
-│   │   ├── models.py                   # model registry queries
-│   │   └── deployments.py              # deployment row queries
-│   ├── lifecycle/
-│   │   ├── __init__.py
-│   │   ├── plan.py                     # DeploymentPlan dataclass
-│   │   ├── docker_client.py            # thin wrapper around docker-py
-│   │   ├── downloader.py               # HF snapshot download wrapper
-│   │   └── manager.py                  # single-deployment lifecycle
-│   ├── backends/
-│   │   ├── __init__.py
-│   │   ├── base.py                     # Backend Protocol
-│   │   └── vllm.py                     # vLLM Backend impl
-│   ├── daemon/
-│   │   ├── __init__.py
-│   │   ├── app.py                      # FastAPI app factory
-│   │   ├── admin.py                    # /admin/* routes
-│   │   ├── openai_proxy.py             # /v1/* routes
-│   │   └── __main__.py                 # python -m serve_engine.daemon
-│   └── cli/
-│       ├── __init__.py                 # Typer app, command registry
-│       ├── ipc.py                      # httpx client for UDS
-│       ├── daemon_cmd.py               # daemon start/stop/status
-│       ├── pull_cmd.py
-│       ├── run_cmd.py
-│       ├── stop_cmd.py
-│       ├── ps_cmd.py
-│       ├── ls_cmd.py
-│       └── logs_cmd.py
-└── tests/
-    ├── conftest.py
-    ├── unit/
-    │   ├── test_store.py
-    │   ├── test_docker_client.py
-    │   ├── test_vllm_backend.py
-    │   ├── test_lifecycle_manager.py
-    │   └── test_admin_endpoints.py
-    └── integration/
-        └── test_openai_proxy.py        # mock upstream engine
+|-- pyproject.toml
+|-- README.md
+|-- src/serve_engine/
+|   |-- __init__.py
+|   |-- config.py                       # paths (~/.serve), constants
+|   |-- store/
+|   |   |-- __init__.py
+|   |   |-- db.py                       # sqlite3 connection, migration runner
+|   |   |-- migrations/001_initial.sql
+|   |   |-- models.py                   # model registry queries
+|   |   +-- deployments.py              # deployment row queries
+|   |-- lifecycle/
+|   |   |-- __init__.py
+|   |   |-- plan.py                     # DeploymentPlan dataclass
+|   |   |-- docker_client.py            # thin wrapper around docker-py
+|   |   |-- downloader.py               # HF snapshot download wrapper
+|   |   +-- manager.py                  # single-deployment lifecycle
+|   |-- backends/
+|   |   |-- __init__.py
+|   |   |-- base.py                     # Backend Protocol
+|   |   +-- vllm.py                     # vLLM Backend impl
+|   |-- daemon/
+|   |   |-- __init__.py
+|   |   |-- app.py                      # FastAPI app factory
+|   |   |-- admin.py                    # /admin/* routes
+|   |   |-- openai_proxy.py             # /v1/* routes
+|   |   +-- __main__.py                 # python -m serve_engine.daemon
+|   +-- cli/
+|       |-- __init__.py                 # Typer app, command registry
+|       |-- ipc.py                      # httpx client for UDS
+|       |-- daemon_cmd.py               # daemon start/stop/status
+|       |-- pull_cmd.py
+|       |-- run_cmd.py
+|       |-- stop_cmd.py
+|       |-- ps_cmd.py
+|       |-- ls_cmd.py
+|       +-- logs_cmd.py
++-- tests/
+    |-- conftest.py
+    |-- unit/
+    |   |-- test_store.py
+    |   |-- test_docker_client.py
+    |   |-- test_vllm_backend.py
+    |   |-- test_lifecycle_manager.py
+    |   +-- test_admin_endpoints.py
+    +-- integration/
+        +-- test_openai_proxy.py        # mock upstream engine
 ```
 
 ---
@@ -184,7 +184,7 @@ dist/
 
 Single-node multi-user inference orchestrator over vLLM (and later SGLang).
 
-Work in progress — see `docs/design/specs/` for the design and
+Work in progress - see `docs/design/specs/` for the design and
 `docs/design/plans/` for implementation plans.
 ```
 
@@ -256,7 +256,7 @@ def test_init_schema_is_idempotent(tmp_path):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/unit/test_store.py -v`
-Expected: FAIL — module `serve_engine.store.db` does not exist.
+Expected: FAIL - module `serve_engine.store.db` does not exist.
 
 - [ ] **Step 3: Write `src/serve_engine/config.py`**
 
@@ -596,7 +596,7 @@ def test_find_active(tmp_path):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/unit/test_store.py -v`
-Expected: FAIL — `deployments` module missing.
+Expected: FAIL - `deployments` module missing.
 
 - [ ] **Step 3: Implement `src/serve_engine/store/deployments.py`**
 
@@ -811,7 +811,7 @@ def test_plan_backend_must_be_supported():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/unit/test_plan.py -v`
-Expected: FAIL — `DeploymentPlan` missing.
+Expected: FAIL - `DeploymentPlan` missing.
 
 - [ ] **Step 3: Implement `src/serve_engine/lifecycle/__init__.py`** (empty file)
 
@@ -951,7 +951,7 @@ def test_default_image():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/unit/test_vllm_backend.py -v`
-Expected: FAIL — module missing.
+Expected: FAIL - module missing.
 
 - [ ] **Step 3: Implement `src/serve_engine/backends/__init__.py`** (empty)
 
@@ -1132,7 +1132,7 @@ def test_stop_is_idempotent_for_missing_container(fake_docker):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/unit/test_docker_client.py -v`
-Expected: FAIL — module missing.
+Expected: FAIL - module missing.
 
 - [ ] **Step 3: Implement `src/serve_engine/lifecycle/docker_client.py`**
 
@@ -1712,7 +1712,7 @@ async def test_list_models(app):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/unit/test_admin_endpoints.py -v`
-Expected: FAIL — `build_app` missing.
+Expected: FAIL - `build_app` missing.
 
 - [ ] **Step 3: Implement `src/serve_engine/daemon/__init__.py`** (empty)
 
@@ -2038,7 +2038,7 @@ async def test_proxy_404_when_no_active(tmp_path, monkeypatch):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/integration/test_openai_proxy.py -v`
-Expected: FAIL — `openai_proxy` missing.
+Expected: FAIL - `openai_proxy` missing.
 
 - [ ] **Step 3: Implement `src/serve_engine/daemon/openai_proxy.py`**
 
@@ -2326,7 +2326,7 @@ Expected: FAIL.
 from __future__ import annotations
 import typer
 
-app = typer.Typer(no_args_is_help=True, add_completion=False, help="serve — single-node inference orchestrator")
+app = typer.Typer(no_args_is_help=True, add_completion=False, help="serve - single-node inference orchestrator")
 ```
 
 - [ ] **Step 4: Implement `src/serve_engine/cli/ipc.py`**
@@ -2396,7 +2396,7 @@ git commit -m "feat(cli): Typer app skeleton + UDS-backed IPC client"
 
 - [ ] **Step 1: Implement `src/serve_engine/cli/daemon_cmd.py`**
 
-(No unit test in this task — daemon control involves subprocess spawning and process lifecycle which is brittle to test in unit form. Smoke-tested in Task 18.)
+(No unit test in this task - daemon control involves subprocess spawning and process lifecycle which is brittle to test in unit form. Smoke-tested in Task 18.)
 
 ```python
 from __future__ import annotations
@@ -2610,7 +2610,7 @@ def run(
     """Load a model and make it active. Stops the current model first."""
     gpu_ids = [int(g) for g in gpu.split(",") if g.strip()]
     if "/" in name_or_repo:
-        # HF repo path → register on the fly with derived name
+        # HF repo path -> register on the fly with derived name
         hf_repo = name_or_repo
         local_name = hf_repo.split("/")[-1].lower()
     else:
@@ -2635,7 +2635,7 @@ def run(
     if image_tag is not None:
         body["image_tag"] = image_tag
 
-    typer.echo(f"loading {local_name} on GPU(s) {gpu_ids} …")
+    typer.echo(f"loading {local_name} on GPU(s) {gpu_ids} ...")
     try:
         result = asyncio.run(ipc.post(config.SOCK_PATH, "/admin/deployments", json=body))
     except RuntimeError as e:
@@ -2896,7 +2896,7 @@ git commit -m "test: end-to-end manual smoke script"
 
 A single-node, multi-user inference orchestrator over vLLM (and soon SGLang).
 
-Goal: solve the operator UX gap left by `vllm serve` / `python -m sglang.launch_server` — one daemon, multi-model, OpenAI-compatible, container-isolated engines, no YAML.
+Goal: solve the operator UX gap left by `vllm serve` / `python -m sglang.launch_server` - one daemon, multi-model, OpenAI-compatible, container-isolated engines, no YAML.
 
 This repository is in active early development. Plan 01 (the walking skeleton) ships single-model serving over vLLM.
 
@@ -2964,9 +2964,9 @@ git commit -m "docs: README quickstart for Plan 01"
 
 After all tasks are complete, the following must hold:
 
-1. `pytest tests/ -v` — all unit + integration tests pass with no GPU.
-2. `ruff check src/ tests/` — clean.
-3. `mypy src/serve_engine` — clean (or documented exceptions).
+1. `pytest tests/ -v` - all unit + integration tests pass with no GPU.
+2. `ruff check src/ tests/` - clean.
+3. `mypy src/serve_engine` - clean (or documented exceptions).
 4. On a real machine with Docker + nvidia-container-toolkit + a GPU:
    - `bash scripts/smoke_e2e.sh` exits 0 and prints `PASS`.
 
@@ -2978,27 +2978,27 @@ If any of these fails, the plan is not complete.
 
 **Spec coverage check (Plan 01 scope only):**
 
-- Daemon process bound to UDS + TCP — Task 12 ✓
-- CLI as thin client over UDS — Tasks 13-17 ✓
-- Per-model container via Docker API (upstream `vllm/vllm-openai`) — Tasks 6, 7, 9 ✓
-- Container on `serve-engines` bridge network, addressed by name — Task 7 ✓
-- Health-check before marking ready — Task 9 ✓
-- OpenAI-compatible proxy with streaming — Task 11 ✓
-- Model registry + on-first-load HF download — Tasks 3, 8, 9 ✓
-- SQLite state (models + deployments) — Tasks 2, 3, 4 ✓
-- Failure handling (engine unhealthy → cleanup + failed status) — Task 9 ✓
+- Daemon process bound to UDS + TCP - Task 12 OK
+- CLI as thin client over UDS - Tasks 13-17 OK
+- Per-model container via Docker API (upstream `vllm/vllm-openai`) - Tasks 6, 7, 9 OK
+- Container on `serve-engines` bridge network, addressed by name - Task 7 OK
+- Health-check before marking ready - Task 9 OK
+- OpenAI-compatible proxy with streaming - Task 11 OK
+- Model registry + on-first-load HF download - Tasks 3, 8, 9 OK
+- SQLite state (models + deployments) - Tasks 2, 3, 4 OK
+- Failure handling (engine unhealthy -> cleanup + failed status) - Task 9 OK
 
 **Explicitly deferred (correct per Plan 01 scope):**
 
-- Multi-deployment lifecycle, pin/auto-swap — Plan 02
-- GPU topology / placement — Plan 02
-- Autotune — Plan 03
-- SGLang backend, engine selection, `backends.yaml` — Plan 04
-- API keys, fair queueing, multi-tenancy — Plan 05
-- `/metrics` aggregation, `/admin/events`, `serve top` — Plan 06
-- Web UI — Plan 07
-- `serve doctor`, install script, daemon-as-container — Plan 08
+- Multi-deployment lifecycle, pin/auto-swap - Plan 02
+- GPU topology / placement - Plan 02
+- Autotune - Plan 03
+- SGLang backend, engine selection, `backends.yaml` - Plan 04
+- API keys, fair queueing, multi-tenancy - Plan 05
+- `/metrics` aggregation, `/admin/events`, `serve top` - Plan 06
+- Web UI - Plan 07
+- `serve doctor`, install script, daemon-as-container - Plan 08
 
-**Placeholder scan:** none — every code step contains the actual code, every command step the actual command.
+**Placeholder scan:** none - every code step contains the actual code, every command step the actual command.
 
 **Type consistency check:** `DeploymentPlan` fields used identically across `vllm.py`, `manager.py`, `admin.py`. `Deployment` dataclass fields used identically across `deployments.py`, `admin.py`. `ContainerHandle` used identically across `docker_client.py` and `manager.py`. No mismatches found.

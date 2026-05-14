@@ -64,7 +64,7 @@ def test_parse_adapter_metadata_extracts_rank(tmp_path):
 
 def test_parse_adapter_metadata_missing_config_returns_none(tmp_path):
     """If adapter_config.json is missing (e.g., non-PEFT format), we
-    return None rather than raise — older / exotic formats still pull,
+    return None rather than raise - older / exotic formats still pull,
     they just don't get rank validation."""
     snap = tmp_path / "snap"
     snap.mkdir()

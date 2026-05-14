@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     prefix TEXT NOT NULL,                         -- "sk-aBc..." first 12 chars, for listing
     key_hash TEXT NOT NULL UNIQUE,                -- sha256 of full secret
     tier TEXT NOT NULL DEFAULT 'standard',
-    -- Optional per-key overrides (NULL → use tier defaults)
+    -- Optional per-key overrides (NULL -> use tier defaults)
     rpm_override INTEGER,
     tpm_override INTEGER,
     rpd_override INTEGER,

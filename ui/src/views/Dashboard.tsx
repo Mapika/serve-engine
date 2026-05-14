@@ -3,14 +3,14 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../api'
 
 function fmtMb(mb: number | null | undefined): string {
-  if (!mb) return '—'
+  if (!mb) return '-'
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
   return `${mb} MB`
 }
 
 function VramCell({ used, reserved, status }: { used: number | null; reserved: number; status: string }) {
   if (status === 'stopped' || status === 'failed') {
-    return <span>—</span>
+    return <span>-</span>
   }
   if (used && used > 0) {
     return (
@@ -20,7 +20,7 @@ function VramCell({ used, reserved, status }: { used: number | null; reserved: n
       </div>
     )
   }
-  // No live measurement yet (early load) — show the reservation.
+  // Show the reservation while live measurement is unavailable.
   return (
     <div className="flex flex-col items-end leading-tight">
       <span className="text-dim">{fmtMb(reserved)}</span>
@@ -30,7 +30,7 @@ function VramCell({ used, reserved, status }: { used: number | null; reserved: n
 }
 
 function fmtGpus(ids: number[] | undefined): string {
-  if (!ids || ids.length === 0) return '—'
+  if (!ids || ids.length === 0) return '-'
   return ids.length === 1 ? `gpu ${ids[0]}` : `gpu ${ids.join(',')}`
 }
 
@@ -77,7 +77,7 @@ export default function Dashboard() {
     <div className="space-y-14">
       <header className="flex items-baseline justify-between">
         <h2 className="text-2xl font-light tracking-tightish caret">dashboard</h2>
-        <div className="label">{(gpus.data ?? []).length} gpu · {active.length} active</div>
+        <div className="label">{(gpus.data ?? []).length} gpu / {active.length} active</div>
       </header>
 
       <section className="space-y-6">
@@ -118,7 +118,7 @@ export default function Dashboard() {
             {visible.length === 0 && (
               <tr>
                 <td colSpan={7} className="!py-12 text-center text-mute">
-                  no active deployments — load one from <span className="text-dim">models</span>
+                  no active deployments. load one from <span className="text-dim">models</span>
                 </td>
               </tr>
             )}
@@ -134,7 +134,7 @@ export default function Dashboard() {
                     <span className="text-dim">{d.status}</span>
                   </td>
                   <td className={d.pinned ? 'text-accent' : 'text-mute'}>
-                    {d.pinned ? '★' : '·'}
+                    {d.pinned ? 'yes' : 'no'}
                   </td>
                   <td className="text-right tnum">
                     <VramCell

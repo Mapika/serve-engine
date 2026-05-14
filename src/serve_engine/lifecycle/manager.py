@@ -114,7 +114,7 @@ class LifecycleManager:
                 )
                 model_store.set_local_path(self._conn, model.id, local_path)
 
-            # 3. Resolve target_concurrency (None → model-size-aware default)
+            # 3. Resolve target_concurrency (None -> model-size-aware default)
             #    and estimate VRAM.
             if plan.target_concurrency is None:
                 target_concurrency = default_target_concurrency(
@@ -138,7 +138,7 @@ class LifecycleManager:
             # 4. Replace any prior ready deployment of this same model name.
             # CLI contract ("Stops the current model first"): `serve run X`
             # supersedes the existing X. Pinned deployments are excluded
-            # from the replace — pin is the operator's commitment that the
+            # from the replace - pin is the operator's commitment that the
             # deployment is special; replacing requires an explicit
             # `serve unpin` first. Doing the cutover after weight prep but
             # before placement keeps the old container live during any HF
@@ -212,10 +212,10 @@ class LifecycleManager:
                 max_loras=plan.max_loras,
                 max_lora_rank=plan.max_lora_rank,
             )
-            # Sub-project C base-pre-warming history. Capture the operator's
-            # plan as JSON before the long health-check window so a daemon
+            # Base pre-warming history. Capture the operator's plan as JSON
+            # before the long health-check window so a daemon
             # crash mid-load doesn't lose it. `reached_ready_at` stays NULL
-            # until the engine's healthz answers — failed loads must not
+            # until the engine's healthz answers - failed loads must not
             # tempt the predictor into replaying a bad config.
             plan_record_id = plan_store.record(
                 self._conn, model_id=model.id, plan=plan, deployment_id=dep.id,
@@ -298,7 +298,7 @@ class LifecycleManager:
             health_url = f"http://{handle.address}:{handle.port}{backend.health_path}"
             ok = await wait_healthy(health_url, timeout_s=self._load_timeout_s)
             if not ok:
-                # Leave the failed container around so its logs survive — without
+                # Leave the failed container around so its logs survive - without
                 # them, "engine did not become healthy" is unactionable. The
                 # operator can `docker logs <name>` to find the real error, then
                 # `serve stop <id>` (which removes the container) when done.

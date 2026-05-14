@@ -1,4 +1,4 @@
-# LLM Serving Wrapper — Design
+# Service Router - Design
 
 **Status:** Draft, brainstorming output
 **Date:** 2026-05-11
@@ -11,11 +11,11 @@ vLLM, SGLang, and TensorRT-LLM are best-in-class inference engines, but their op
 The target user is **anyone who owns one beefy GPU box and wants to serve their own users from it.** That spans:
 
 - Homelabbers with a 4090 / 4090 / H100 serving themselves and a few friends or a Discord bot.
-- Engineering organisations that buy a single 8× B300 instance and serve the whole company from it.
+- Engineering organisations that buy a single 8x B300 instance and serve the whole company from it.
 
-The unifying property is **single-node, self-hosted, multi-user**. Not SaaS, not multi-node distributed serving. The product is "the inference server you put on your one big GPU box, and it just works."
+The unifying property is **single-node, self-hosted, multi-user**. Not SaaS, not multi-node distributed serving. The product is "the inference server you put on your one big GPU box, and it handles lifecycle and routing without extra app code."
 
-Speed and concurrency are not our problem — vLLM and SGLang already solve them via continuous batching, paged/radix attention, etc. Our job is orchestration, lifecycle, and UX.
+Speed and concurrency are not our problem - vLLM and SGLang already solve them via continuous batching, paged/radix attention, etc. Our job is orchestration, lifecycle, and UX.
 
 ## 2. Goals & non-goals
 
@@ -44,12 +44,12 @@ Speed and concurrency are not our problem — vLLM and SGLang already solve them
 
 ### 3.1 Components
 
-1. **Daemon** — long-running Python process. Owns model registry, lifecycle manager, request router, OpenAI-compatible API, web UI, admin API, metrics. Started by `serve daemon start`, systemd, or run as a container.
-2. **CLI** (`serve`) — thin Python client. Talks to the daemon over a Unix domain socket at `~/.serve/sock`. Does not import vLLM / SGLang; starts fast.
-3. **Engine containers** — one per loaded model. Use upstream official images (`vllm/vllm-openai:<tag>`, `lmsysorg/sglang:<tag>`). The daemon spawns and supervises them through the Docker API.
-4. **Web UI** — Vite + React SPA bundled into the Python package, served by the daemon at `http://localhost:<port>/`. Reads admin API; no separate backend-for-frontend.
-5. **Local model store** — `~/.serve/models/` following HF Hub's snapshot layout so the cache is shared with other tools (transformers, native vLLM).
-6. **State store** — SQLite at `~/.serve/db.sqlite` for the model registry, deployments, API keys, usage, configuration.
+1. **Daemon** - long-running Python process. Owns model registry, lifecycle manager, request router, OpenAI-compatible API, web UI, admin API, metrics. Started by `serve daemon start`, systemd, or run as a container.
+2. **CLI** (`serve`) - thin Python client. Talks to the daemon over a Unix domain socket at `~/.serve/sock`. Does not import vLLM / SGLang; starts fast.
+3. **Engine containers** - one per loaded model. Use upstream official images (`vllm/vllm-openai:<tag>`, `lmsysorg/sglang:<tag>`). The daemon spawns and supervises them through the Docker API.
+4. **Web UI** - Vite + React SPA bundled into the Python package, served by the daemon at `http://localhost:<port>/`. Reads admin API; no separate backend-for-frontend.
+5. **Local model store** - `~/.serve/models/` following HF Hub's snapshot layout so the cache is shared with other tools (transformers, native vLLM).
+6. **State store** - SQLite at `~/.serve/db.sqlite` for the model registry, deployments, API keys, usage, configuration.
 
 ### 3.2 Process & container topology
 
@@ -60,19 +60,19 @@ Speed and concurrency are not our problem — vLLM and SGLang already solve them
 ### 3.3 Request flow (inference)
 
 ```
-client ──POST /v1/chat/completions──▶ daemon
-                                        │ 1. authenticate API key, check quota
-                                        │ 2. parse `model` field
-                                        │ 3. lifecycle manager:
-                                        │      loaded? → route
-                                        │      not loaded? → swap, wait, route
-                                        ▼
+client --POST /v1/chat/completions--> daemon
+                                        | 1. authenticate API key, check quota
+                                        | 2. parse `model` field
+                                        | 3. lifecycle manager:
+                                        |      loaded? -> route
+                                        |      not loaded? -> swap, wait, route
+                                        v
                                    engine container (serve-engines/<id>:<port>)
-                                        │
-client ◀─────stream proxied back─── daemon
+                                        |
+client <-----stream proxied back--- daemon
 ```
 
-Streaming is end-to-end — daemon does not buffer.
+Streaming is end-to-end - daemon does not buffer.
 
 ### 3.4 Control flow (CLI / Web UI)
 
@@ -82,12 +82,12 @@ CLI hits the Unix socket; Web UI hits `/admin/*` on the public port with the adm
 
 ### 4.1 Deployment abstraction
 
-A *deployment* is `(model, gpu_set, backend, image_tag, engine_args, status)`. One model may have multiple deployments (different TP shapes, different engines). State lives in SQLite. Status transitions: `pending → loading → ready → stopping → stopped` (with `ready` and serving requests being the same state), plus `failed` as a terminal state reachable from any active state.
+A *deployment* is `(model, gpu_set, backend, image_tag, engine_args, status)`. One model may have multiple deployments (different TP shapes, different engines). State lives in SQLite. Status transitions: `pending -> loading -> ready -> stopping -> stopped` (with `ready` and serving requests being the same state), plus `failed` as a terminal state reachable from any active state.
 
 ### 4.2 Model registry & pull
 
 - Model entry: `(name, hf_repo, revision, local_path, default_backend, default_engine_args, aliases)`.
-- `serve pull <name>` resolves alias → HF repo → downloads via `huggingface_hub` (parallel chunks, resume, checksum) to `~/.serve/models/`.
+- `serve pull <name>` resolves alias -> HF repo -> downloads via `huggingface_hub` (parallel chunks, resume, checksum) to `~/.serve/models/`.
 - Built-in catalog (a YAML shipped with the package) covers popular models with sensible defaults. Users add custom entries with `serve model add`.
 
 ### 4.3 GPU placement
@@ -105,7 +105,7 @@ A *deployment* is `(model, gpu_set, backend, image_tag, engine_args, status)`. O
 
 - Each deployment is `pinned` or `auto`. Pinned never evicts automatically.
 - Auto deployments have an `idle_timeout` (default 5 min, configurable per-model). A background reaper evicts ones that have gone idle.
-- Request for a non-loaded model triggers placement → eviction (if needed) → `docker run` for the new engine → wait for `/health` → route. Caller holds during the swap with a generous deadline (5 min default for big models).
+- Request for a non-loaded model triggers placement -> eviction (if needed) -> `docker run` for the new engine -> wait for `/health` -> route. Caller holds during the swap with a generous deadline (5 min default for big models).
 - Lifecycle transitions emit structured events on `/admin/events` (SSE) so the UI stays coherent.
 
 ### 4.5 Fast loading
@@ -120,9 +120,9 @@ Explicitly not in v1: predictive prefetch, custom snapshotting, shared-memory we
 
 ### 4.6 Failure handling
 
-- Engine container exits unexpectedly → detected via health-check loop and Docker events. Auto-restart up to 3 times with exponential backoff. After that, deployment goes `failed`; new requests return a clean 503 with the engine's last log lines.
-- OOM at load time → if autotune is enabled, retry once with reduced `gpu-memory-utilization`. Otherwise surface the engine's own error.
-- Load deadline exceeded → kill the container, return a clear timeout, surface the relevant tail of engine logs.
+- Engine container exits unexpectedly -> detected via health-check loop and Docker events. Auto-restart up to 3 times with exponential backoff. After that, deployment goes `failed`; new requests return a clean 503 with the engine's last log lines.
+- OOM at load time -> if autotune is enabled, retry once with reduced `gpu-memory-utilization`. Otherwise surface the engine's own error.
+- Load deadline exceeded -> kill the container, return a clear timeout, surface the relevant tail of engine logs.
 
 The throughline: **every failure produces structured logs, a state event, and an actionable HTTP response.**
 
@@ -154,7 +154,7 @@ All commands support `--json` for scripting.
 
 Three slices on the same port:
 
-**(a) OpenAI-compatible — the inference product surface:**
+**(a) OpenAI-compatible - the inference product surface:**
 - `POST /v1/chat/completions` (streaming + non-streaming)
 - `POST /v1/completions`
 - `POST /v1/embeddings`
@@ -163,18 +163,18 @@ Three slices on the same port:
 
 Advanced request fields (`response_format`, `tools`, `logit_bias`, LoRA via `model: "base@adapter"` syntax) ride through transparently to the engine. We do not validate or reshape them.
 
-**(b) Engine-native passthrough — power-user escape hatch:**
-- `POST /engines/{deployment_id}/*` — proxied directly to the engine container.
+**(b) Engine-native passthrough - power-user escape hatch:**
+- `POST /engines/{deployment_id}/*` - proxied directly to the engine container.
 
 Any engine feature shipped upstream is usable on day one.
 
-**(c) Admin / control plane — for CLI and Web UI:**
+**(c) Admin / control plane - for CLI and Web UI:**
 - `GET|POST|DELETE /admin/deployments[/:id][/pin]`
 - `GET|POST|DELETE /admin/models[/:id]`
 - `GET|POST|DELETE /admin/keys[/:id]`
-- `GET /admin/gpus` — topology + live utilization
-- `GET /admin/events` — SSE lifecycle event stream
-- `GET /metrics` — Prometheus, aggregated from engine `/metrics`
+- `GET /admin/gpus` - topology + live utilization
+- `GET /admin/events` - SSE lifecycle event stream
+- `GET /metrics` - Prometheus, aggregated from engine `/metrics`
 
 Auth: API keys with `sk-` prefix on `/v1/*`; an admin key (auto-generated on first run, printed to CLI) on `/admin/*`.
 
@@ -182,11 +182,11 @@ Auth: API keys with `sk-` prefix on `/v1/*`; an admin key (auto-generated on fir
 
 Vite + React SPA bundled in the package, served at `/`. Five screens:
 
-1. **Dashboard** — loaded models, per-GPU memory bars (real device topology rendered), live throughput sparkline.
-2. **Models** — registry list, pull with progress, pin/unpin toggles, "load now" button.
-3. **Playground** — simple chat with model picker.
-4. **API Keys** — create / revoke / per-key usage stats.
-5. **Logs** — tailed engine logs per deployment.
+1. **Dashboard** - loaded models, per-GPU memory bars (real device topology rendered), live throughput sparkline.
+2. **Models** - registry list, pull with progress, pin/unpin toggles, "load now" button.
+3. **Playground** - simple chat with model picker.
+4. **API Keys** - create / revoke / per-key usage stats.
+5. **Logs** - tailed engine logs per deployment.
 
 No user accounts beyond API keys; no role-based permissions; no multi-org tenancy.
 
@@ -211,7 +211,7 @@ class Backend(Protocol):
 
 This is the entire contract. ~80% of integration work per backend is `build_argv`. Adding TRT-LLM later is one more `Backend` plus an adapter for its build-time compile step.
 
-We do **not** abstract over inference primitives — OpenAI requests go to the engine unmodified.
+We do **not** abstract over inference primitives - OpenAI requests go to the engine unmodified.
 
 ### 6.2 DeploymentPlan (autotune output)
 
@@ -240,7 +240,7 @@ Inputs: model metadata (params, dtype, head config, max context), available GPU 
 
 1. **Engine choice.** Default vLLM. Switch to SGLang for known prefix-caching beneficiaries (agentic, multi-turn-heavy) and certain MoE families (Deepseek-V3, Qwen variants benefiting from DP-attention). Decisions live in `backends/selection.yaml`, not in code.
 2. **Quantization.** Inherit from checkpoint if present; else `bf16` on Ampere+ Blackwell, `fp16` on older. No on-the-fly quantization in v1.
-3. **TP/PP sizing.** Smallest power-of-2 TP that satisfies: `weights/TP + KV_cache_at_target_concurrency + activations < per_gpu_vram × 0.9`. Must divide `num_attention_heads`. Refuse with a clear message if no TP fits.
+3. **TP/PP sizing.** Smallest power-of-2 TP that satisfies: `weights/TP + KV_cache_at_target_concurrency + activations < per_gpu_vram x 0.9`. Must divide `num_attention_heads`. Refuse with a clear message if no TP fits.
 4. **GPU placement.** Section 4.3 algorithm against current state.
 5. **Context length.** Clamp user value to model max; default to `min(model_max, 32k)`.
 6. **gpu-memory-utilization.** 0.9 single-tenant; scaled down when sharing GPUs.
@@ -270,7 +270,7 @@ Overridable: `serve config set engine.vllm.image vllm/vllm-openai:v0.7.5`. `serv
 
 ## 7. Concurrency, fairness, and the "company case"
 
-The Python orchestrator is not the bottleneck — engine batching is. Our job is to stay out of the way.
+The Python orchestrator is not the bottleneck - engine batching is. Our job is to stay out of the way.
 
 - Daemon is fully async (FastAPI + uvicorn; httpx async client with a generous connection pool to each engine). Streaming requests pass through without buffering.
 - We do **not** serialise requests; engines receive concurrent in-flight requests so their internal schedulers do the batching.
@@ -278,16 +278,16 @@ The Python orchestrator is not the bottleneck — engine batching is. Our job is
 - Beyond engine capacity, requests queue at the orchestrator with weighted-fair queueing per API key, so one heavy user can't starve others.
 - Per-API-key rate limits (token / request / per-window) configured at key creation.
 
-The 8× B300 case (≈640 GB HBM) typically hosts a mix: one TP-8 frontier model, or several smaller models on disjoint GPU sets. Placement handles both.
+The 8x B300 case (~640 GB HBM) typically hosts a mix: one TP-8 frontier model, or several smaller models on disjoint GPU sets. Placement handles both.
 
 ## 8. Packaging, install, observability, testing
 
 ### 8.1 Install paths
 
 1. **`uv tool install serve-engine`** (recommended for individuals / homelabbers). One command, fast lockfile, no global Python pollution.
-2. **Daemon as a container** (`ghcr.io/<org>/serve-engine:latest`) — bind-mount Docker socket + `~/.serve`. Recommended when teams don't want Python on the host at all.
-3. **`serve install-service`** — writes a systemd unit referencing the `uv tool install`-ed binary. For "survive reboots" production.
-4. **`curl -sSL https://<host>/install.sh | sh`** — wraps option 1 with environment checks (Docker, nvidia-container-toolkit) and runs `serve setup` at the end.
+2. **Daemon as a container** (`ghcr.io/<org>/serve-engine:latest`) - bind-mount Docker socket + `~/.serve`. Recommended when teams don't want Python on the host at all.
+3. **`serve install-service`** - writes a systemd unit referencing the `uv tool install`-ed binary. For "survive reboots" production.
+4. **`curl -sSL https://<host>/install.sh | sh`** - wraps option 1 with environment checks (Docker, nvidia-container-toolkit) and runs `serve setup` at the end.
 
 ### 8.2 Observability
 
@@ -299,21 +299,21 @@ The 8× B300 case (≈640 GB HBM) typically hosts a mix: one TP-8 frontier model
 ### 8.3 Testing strategy
 
 1. **Unit (Python, no GPU, <30s):** autotune decisions, placement, lifecycle state machine, OpenAI translation, fair queueing.
-2. **Integration (containerised fake engine, no GPU):** end-to-end daemon behavior — slow loads, OOM, crash mid-stream, slow streams. Runs in CI.
+2. **Integration (containerised fake engine, no GPU):** end-to-end daemon behavior - slow loads, OOM, crash mid-stream, slow streams. Runs in CI.
 3. **GPU smoke (real hardware, self-hosted runner):** pull Llama-3.2-1B, load, run 100 concurrent chats, verify p99 below target. Triggered manually or pre-release.
 
-### 8.4 Diagnostic — `serve doctor`
+### 8.4 Diagnostic - `serve doctor`
 
 ```
-✓ CUDA 12.6 detected (driver 565.x)
-✓ 8 GPUs visible (8× B300, NVLink mesh)
-✓ Docker 26.1 running, current user in docker group
-✓ nvidia-container-toolkit configured (cuda:12.4-base passes nvidia-smi)
-✓ vllm/vllm-openai:v0.7.3 pulled
-✗ lmsysorg/sglang:v0.4.2.post1 missing → `serve pull-engine sglang`
-✓ Port 11500 free
-✓ ~/.serve writable
-✓ HF_TOKEN set (gated models accessible)
+OK CUDA 12.6 detected (driver 565.x)
+OK 8 GPUs visible (8x B300, NVLink mesh)
+OK Docker 26.1 running, current user in docker group
+OK nvidia-container-toolkit configured (cuda:12.4-base passes nvidia-smi)
+OK vllm/vllm-openai:v0.7.3 pulled
+FAIL lmsysorg/sglang:v0.4.2.post1 missing -> `serve pull-engine sglang`
+OK Port 11500 free
+OK ~/.serve writable
+OK HF_TOKEN set (gated models accessible)
 ```
 
 Principle for the whole product: **every config decision the user could be forced to make is either auto-detected, has a sensible default, or has a `doctor` line telling them how to fix it.**
@@ -322,35 +322,35 @@ Principle for the whole product: **every config decision the user could be force
 
 ```
 serving-engine/
-├── pyproject.toml
-├── README.md
-├── src/serve_engine/
-│   ├── __init__.py
-│   ├── daemon/                  # FastAPI app, lifecycle manager, router
-│   ├── cli/                     # Click / Typer commands (thin)
-│   ├── backends/                # vllm.py, sglang.py, selection.yaml, backends.yaml
-│   ├── lifecycle/               # placement, eviction, deployment state machine
-│   ├── autotune/                # plan builder, heuristics
-│   ├── store/                   # SQLite models, migrations
-│   ├── proxy/                   # OpenAI translation, streaming, queueing
-│   ├── admin_api/               # /admin/*
-│   ├── observability/           # logs, metrics, events
-│   ├── doctor/                  # environment checks
-│   └── ui/                      # bundled SPA assets
-├── ui/                          # source for the SPA (Vite + React)
-├── docker/
-│   ├── daemon.Dockerfile        # for the containerised daemon option
-│   └── fake-engine.Dockerfile   # test double
-└── tests/
-    ├── unit/
-    ├── integration/
-    └── smoke/
+|-- pyproject.toml
+|-- README.md
+|-- src/serve_engine/
+|   |-- __init__.py
+|   |-- daemon/                  # FastAPI app, lifecycle manager, router
+|   |-- cli/                     # Click / Typer commands (thin)
+|   |-- backends/                # vllm.py, sglang.py, selection.yaml, backends.yaml
+|   |-- lifecycle/               # placement, eviction, deployment state machine
+|   |-- autotune/                # plan builder, heuristics
+|   |-- store/                   # SQLite models, migrations
+|   |-- proxy/                   # OpenAI translation, streaming, queueing
+|   |-- admin_api/               # /admin/*
+|   |-- observability/           # logs, metrics, events
+|   |-- doctor/                  # environment checks
+|   +-- ui/                      # bundled SPA assets
+|-- ui/                          # source for the SPA (Vite + React)
+|-- docker/
+|   |-- daemon.Dockerfile        # for the containerised daemon option
+|   +-- fake-engine.Dockerfile   # test double
++-- tests/
+    |-- unit/
+    |-- integration/
+    +-- smoke/
 ```
 
 ## 10. Open questions / future work
 
 - Final naming (CLI binary, package, repo, default daemon port).
-- TRT-LLM integration shape — its build-time engine compilation needs an extra step before the deployment can be marked "ready"; design admits this but doesn't pin the UX yet.
-- Speculative-decoding UX — the engines support several modes (EAGLE, n-gram, MTP); decide how to expose.
+- TRT-LLM integration shape - its build-time engine compilation needs an extra step before the deployment can be marked "ready"; design admits this but doesn't pin the UX yet.
+- Speculative-decoding UX - the engines support several modes (EAGLE, n-gram, MTP); decide how to expose.
 - Whether to ship a default-deny outbound network policy on engine containers (we mount the model cache, so engines don't *need* outbound; this is a hardening hook for company deployments).
-- Whether `serve update-engines` should also bump the daemon (probably not — daemon and engines update on separate cadences).
+- Whether `serve update-engines` should also bump the daemon (probably not - daemon and engines update on separate cadences).

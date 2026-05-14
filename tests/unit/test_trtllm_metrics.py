@@ -95,7 +95,7 @@ def test_translate_malformed_json_returns_empty_string():
 
 
 def test_translate_missing_nested_objects_skips_those_metrics():
-    # No inflightBatchingStats / kvCacheStats — top-level metrics still emit.
+    # No inflightBatchingStats / kvCacheStats - top-level metrics still emit.
     sparse = [{"iter": 0, "gpuMemUsage": 1234, "maxNumActiveRequests": 8}]
     text = translate_trtllm_metrics(json.dumps(sparse), deployment_id=7)
     assert 'trtllm_gpu_memory_bytes{deployment_id="7"} 1234' in text
@@ -107,7 +107,7 @@ def test_translate_missing_nested_objects_skips_those_metrics():
 
 def test_translate_picks_latest_iteration_in_array():
     # When the body holds multiple iteration objects, the translator must
-    # publish the most recent — Prometheus gauges are point-in-time.
+    # publish the most recent - Prometheus gauges are point-in-time.
     older = json.loads(json.dumps(_SAMPLE[0]))
     older["iter"] = 0
     older["gpuMemUsage"] = 100
@@ -151,7 +151,7 @@ def test_translate_all_empty_returns_empty_string():
 
 def test_translate_bool_field_is_skipped():
     """Bool would render as `True`/`False` which Prometheus rejects. Defensive
-    skip — none of the documented fields are booleans, but TRT-LLM's schema
+    skip - none of the documented fields are booleans, but TRT-LLM's schema
     may grow."""
     obj = [{"iter": 1, "gpuMemUsage": True}]
     text = translate_trtllm_metrics(json.dumps(obj), deployment_id=1)

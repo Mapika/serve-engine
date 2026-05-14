@@ -117,7 +117,7 @@ export default function Playground() {
               value={selected}
               onChange={e => setSelected(e.target.value)}
             >
-              <option value="">— choose model —</option>
+              <option value="">choose model</option>
               {(models.data ?? []).map((m: any) => (
                 <option key={m.name} value={m.name}>{m.name}</option>
               ))}
@@ -142,7 +142,7 @@ export default function Playground() {
           <textarea
             className="field w-full font-mono text-[13px]"
             style={{ minHeight: '8rem' }}
-            placeholder="ask something…"
+            placeholder="ask something"
             value={prompt}
             onChange={e => setPrompt(e.target.value)}
             onKeyDown={e => {
@@ -156,12 +156,12 @@ export default function Playground() {
                 disabled={!selected || !prompt.trim() || pending}
                 onClick={send}
               >
-                {pending ? 'streaming…' : 'send →'}
+                {pending ? 'streaming...' : 'send'}
               </button>
               {pending && (
                 <button className="btn" onClick={stop}>stop</button>
               )}
-              <span className="label">⌘↵</span>
+              <span className="label">Ctrl+Enter</span>
             </div>
             {(stats.ttftMs !== null || stats.totalMs !== null) && (
               <div className="flex gap-6 text-mute text-[11px] tnum">
@@ -211,7 +211,7 @@ export default function Playground() {
           )}
           {(answer || (pending && !reasoning)) && (
             <pre className="text-[13px] whitespace-pre-wrap font-mono leading-relaxed border-l border-accent pl-4">
-              {answer || (pending ? <span className="text-mute">waiting for tokens…</span> : '')}
+              {answer || (pending ? <span className="text-mute">waiting for tokens...</span> : '')}
             </pre>
           )}
         </div>

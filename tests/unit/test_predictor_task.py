@@ -1,4 +1,4 @@
-"""PredictorTask tick loop: candidate → preload → junction row.
+"""PredictorTask tick loop: candidate -> preload -> junction row.
 
 The tick loop is the seam where the pure-function predictor meets the
 engine HTTP layer. Tests cover the happy path (adapter gets loaded),
@@ -85,7 +85,7 @@ def _intercept_engine_loads(monkeypatch):
 
 
 def _only_seq() -> PredictorConfig:
-    """Config with only the sequencing rule on — the easiest rule to
+    """Config with only the sequencing rule on - the easiest rule to
     trigger with a single seed event."""
     return PredictorConfig(
         time_of_day=RuleConfig(enabled=False),
@@ -103,7 +103,7 @@ async def test_tick_preloads_adapter_into_existing_deployment(tmp_path, monkeypa
     _, dep = _seed_deployment(conn, "qwen3-7b")
     a = _seed_adapter(conn, "tone-formal", "qwen3-7b", tmp_path)
 
-    # Build sequencing history: 5 historical (base) → (adapter) pairs +
+    # Build sequencing history: 5 historical (base) -> (adapter) pairs +
     # a recent base trigger.
     now = datetime.now(UTC).replace(tzinfo=None)
     for i in range(5):
@@ -172,13 +172,13 @@ async def test_tick_skips_bare_base_candidates(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_tick_skips_already_loaded_adapter(tmp_path, monkeypatch):
     """If the adapter is already in the junction table, the predictor
-    must not re-issue a load to the engine — that would be wasted work."""
+    must not re-issue a load to the engine - that would be wasted work."""
     conn = _fresh(tmp_path)
     _, dep = _seed_deployment(conn, "qwen3-7b")
     a = _seed_adapter(conn, "tone-formal", "qwen3-7b", tmp_path)
     da_store.attach(conn, dep.id, a.id)  # pre-load
 
-    # Build sequencing → tone-formal.
+    # Build sequencing -> tone-formal.
     now = datetime.now(UTC).replace(tzinfo=None)
     for i in range(5):
         x_ts = now - timedelta(hours=1) - timedelta(minutes=i)
@@ -208,9 +208,9 @@ async def test_tick_skips_already_loaded_adapter(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_tick_skips_when_no_ready_base_deployment(tmp_path, monkeypatch):
-    """Adapter candidate with no ready base deployment → skip + count."""
+    """Adapter candidate with no ready base deployment -> skip + count."""
     conn = _fresh(tmp_path)
-    # Register the base AND the adapter — but no deployment.
+    # Register the base AND the adapter - but no deployment.
     model_store.add(conn, name="qwen3-7b", hf_repo="o/qwen3-7b")
     _seed_adapter(conn, "tone-formal", "qwen3-7b", tmp_path)
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -259,7 +259,7 @@ async def test_tick_respects_max_prewarm_per_tick(tmp_path, monkeypatch):
             "VALUES (?, 'qwen3-7b', 'qwen3-7b', NULL)",
             (x_ts.strftime("%Y-%m-%d %H:%M:%S"),),
         )
-        # Rotate through three adapters — each gets P~0.33.
+        # Rotate through three adapters - each gets P~0.33.
         adapter_name = ("lora-a", "lora-b", "lora-c")[i % 3]
         conn.execute(
             "INSERT INTO usage_events (ts, model_name, base_name, adapter_name) "
@@ -326,7 +326,7 @@ async def test_tick_disabled_predictor_is_noop(tmp_path, monkeypatch):
     assert cap == []
 
 
-# ---- Base pre-warming (Sub-project C follow-up) ----------------------------
+# ---- Base pre-warming (Workstream C follow-up) ----------------------------
 
 from unittest.mock import AsyncMock  # noqa: E402
 
@@ -354,10 +354,10 @@ async def test_base_prewarm_fires_for_bare_base_candidate_with_history(
 ):
     """Sequencing produces a bare-base candidate; the tick reconstructs the
     plan from history and calls manager.load. No engine HTTP intercept
-    needed — manager is mocked, so the load is a single coroutine call."""
+    needed - manager is mocked, so the load is a single coroutine call."""
     conn = _fresh(tmp_path)
     _seed_plan(conn, "qwen3-7b")
-    # Sequencing history: another-base → qwen3-7b (bare).
+    # Sequencing history: another-base -> qwen3-7b (bare).
     now = datetime.now(UTC).replace(tzinfo=None)
     for i in range(5):
         x_ts = now - timedelta(hours=1) - timedelta(minutes=i)
@@ -432,7 +432,7 @@ async def test_base_prewarm_skips_when_no_history(tmp_path):
 
 @pytest.mark.asyncio
 async def test_base_prewarm_skips_when_deployment_already_ready(tmp_path):
-    """The base is already serving. Don't spin up a duplicate — the
+    """The base is already serving. Don't spin up a duplicate - the
     predictor sees the bare-base candidate but the ready deployment
     short-circuits the path."""
     conn = _fresh(tmp_path)
@@ -473,7 +473,7 @@ async def test_base_prewarm_skips_when_deployment_already_ready(tmp_path):
     await asyncio.sleep(0)
 
     assert manager.load.call_count == 0
-    # Counter doesn't bump for "already-ready" — that's a happy outcome,
+    # Counter doesn't bump for "already-ready" - that's a happy outcome,
     # not a missing-plan miss. The skipped_no_plan counter must stay 0
     # so operators distinguish "predictor is doing nothing" from "the
     # base is up and predictor correctly noticed".
@@ -482,7 +482,7 @@ async def test_base_prewarm_skips_when_deployment_already_ready(tmp_path):
 
 @pytest.mark.asyncio
 async def test_base_prewarm_respects_zero_budget(tmp_path):
-    """max_base_prewarm_per_tick=0 disables base pre-warming entirely —
+    """max_base_prewarm_per_tick=0 disables base pre-warming entirely  -
     operator opts out via predictor.yaml."""
     conn = _fresh(tmp_path)
     _seed_plan(conn, "qwen3-7b")

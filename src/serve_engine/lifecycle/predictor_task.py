@@ -6,10 +6,10 @@ Adapter pre-warming fires whenever the rules surface an adapter candidate
 and a ready base deployment with LoRA slots exists. Base pre-warming is
 opt-in via `max_base_prewarm_per_tick` and only fires when the
 deployment_plans history table has a successfully-loaded plan for the
-base — the predictor never invents a config it hasn't seen succeed.
+base - the predictor never invents a config it hasn't seen succeed.
 
-Guardrails per design §5: never preempt an in-flight request, never
-evict pinned, cap at max_prewarm_per_tick. Predictions are advisory —
+Guardrails per design section5: never preempt an in-flight request, never
+evict pinned, cap at max_prewarm_per_tick. Predictions are advisory  -
 a real request always wins.
 """
 from __future__ import annotations
@@ -98,7 +98,7 @@ class PredictorTask:
                 # No ready base deployment of this adapter's base, OR
                 # the base has --max-loras=0. Try to pre-warm the base
                 # from its recorded plan so the adapter can land on the
-                # next tick — this is what "base-deployment pre-warming"
+                # next tick - this is what "base-deployment pre-warming"
                 # closes: previously the predictor saw the adapter
                 # candidate, found no base, and just bumped the counter.
                 self.preloads_skipped_no_deployment += 1
@@ -152,7 +152,7 @@ class PredictorTask:
         - base_prewarm budget is 0 (operator disabled it in predictor.yaml)
         - the base model is unknown
         - already have a ready/loading deployment of this base
-        - no history row with reached_ready_at — never invent a config
+        - no history row with reached_ready_at - never invent a config
 
         We deliberately don't block the tick on the load: it's launched as
         a background task so the predictor stays responsive. Failures are
@@ -195,7 +195,7 @@ class PredictorTask:
 
         self.base_prewarms_attempted += 1
         # Detach: manager.load can take 30-60s for a fresh engine warmup;
-        # the tick itself stays snappy. The task is fire-and-forget — any
+        # the tick itself stays snappy. The task is fire-and-forget - any
         # failure is logged and shows up to the operator as a normal
         # failed deployment row in `serve ps`.
         async def _run() -> None:

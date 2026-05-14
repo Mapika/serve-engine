@@ -52,7 +52,7 @@ def test_evict_then_fit_lru_first():
     req = PlacementRequest(
         tensor_parallel=1, vram_reserved_mb=70_000, model_name="x",
     )
-    # GPU 1 free → fits there
+    # GPU 1 free -> fits there
     decision = plan_placement(topo, allocated=alloc, request=req)
     assert isinstance(decision, Fit)
     assert decision.gpu_ids == [1]

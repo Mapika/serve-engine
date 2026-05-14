@@ -47,7 +47,7 @@ class LockedConnection:
 
     The daemon shares one long-lived connection across FastAPI sync deps that
     run in the anyio worker-thread pool. sqlite3 with `check_same_thread=False`
-    permits cross-thread use but does not serialize — concurrent execute()
+    permits cross-thread use but does not serialize - concurrent execute()
     calls corrupt cursor state, surfacing as 'bad parameter or other API
     misuse', empty rows, or NoneType subscript errors.
 
@@ -114,7 +114,7 @@ def connect(path: Path) -> sqlite3.Connection:
     `isolation_level=None` puts the connection in autocommit mode: every DML
     statement commits immediately. This is necessary because the daemon
     shares a single long-lived connection across handlers that don't manage
-    transactions explicitly — without autocommit, writes are lost on shutdown.
+    transactions explicitly - without autocommit, writes are lost on shutdown.
     Plan 02 will likely move to connection-per-request and re-introduce
     explicit transactions where useful.
 

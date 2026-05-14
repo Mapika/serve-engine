@@ -112,7 +112,7 @@ class ContainerBackend:
 
         If the backend already emitted the same flag, the earlier emission
         (and its value) is removed first so the user override wins cleanly
-        instead of relying on argparse last-value-wins semantics — strict
+        instead of relying on argparse last-value-wins semantics - strict
         argparsers (some TRT-LLM versions) reject duplicate flags outright.
         Heuristic for "next token is the flag's value": doesn't start with
         '--'. Engine flag values are paths/numbers/dtype names; collisions

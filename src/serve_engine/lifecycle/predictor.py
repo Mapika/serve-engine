@@ -1,4 +1,4 @@
-"""Sub-project C — rule-based predictor.
+"""Rule-based predictor.
 
 Three rules over `usage_events`:
   1. time_of_day: pre-warm models the operator's traffic has historically
@@ -12,7 +12,7 @@ Each rule emits Candidate(base_name, adapter_name, score, reason).
 Predictor.candidates() runs all enabled rules, dedupes by (base, adapter)
 keeping max score, and returns sorted desc.
 
-Design: docs/design/specs/2026-05-13-predictive-layer-design.md §4.
+Design: docs/design/specs/2026-05-13-predictive-layer-design.md section4.
 """
 from __future__ import annotations
 
@@ -65,12 +65,12 @@ class PredictorConfig:
     tick_interval_s: int = 30
     max_prewarm_per_tick: int = 2
     retention_days: int = 30
-    # Base pre-warming budget — separate from adapter pre-warming because
+    # Base pre-warming budget - separate from adapter pre-warming because
     # starting a base from scratch is 30-60s of engine warmup + a Docker
     # container, far more disruptive than a sub-second LoRA hot-load. Default
     # of 1 keeps the loop conservative; 0 disables base pre-warming entirely
     # (the v2.0 behavior). The base only fires when we have a recorded plan
-    # in `deployment_plans.reached_ready_at` — predictor never invents a
+    # in `deployment_plans.reached_ready_at` - predictor never invents a
     # config it has never seen succeed.
     max_base_prewarm_per_tick: int = 1
     time_of_day: RuleConfig = field(default_factory=RuleConfig)
@@ -80,7 +80,7 @@ class PredictorConfig:
     @classmethod
     def load(cls, path: Path) -> PredictorConfig:
         """Read ~/.serve/predictor.yaml. Missing file / malformed YAML /
-        missing keys all silently fall back to defaults — operators can
+        missing keys all silently fall back to defaults - operators can
         ship a partial file and only override the fields they care about.
         """
         if not path.is_file():
@@ -161,7 +161,7 @@ class Predictor:
                     if cur is None or c.score > cur.score:
                         seen[c.key] = c
             except Exception:
-                # One bad rule must not poison the queue — log and skip.
+                # One bad rule must not poison the queue - log and skip.
                 # Caller (tick loop) emits the predictor.error event.
                 continue
         return sorted(seen.values(), key=lambda c: -c.score)

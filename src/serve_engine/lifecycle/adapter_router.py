@@ -5,7 +5,7 @@ one async helper (`ensure_adapter_loaded`) that handles the
 hot-load-when-needed case the proxy hits on a request for an adapter
 that's not yet in any deployment.
 
-Design: see docs/design/specs/2026-05-13-adapter-lifecycle-design.md §7.
+Design: see docs/design/specs/2026-05-13-adapter-lifecycle-design.md section7.
 """
 from __future__ import annotations
 
@@ -49,11 +49,11 @@ def resolve_target(conn: sqlite3.Connection, model_field: str) -> ResolvedTarget
     """Resolve an OpenAI `model` field to (base, adapter|None).
 
     Three forms accepted:
-    1. `base_name:adapter_name` — explicit composite. Base must match the
+    1. `base_name:adapter_name` - explicit composite. Base must match the
        adapter's registered base; otherwise raises UnknownModel.
-    2. `adapter_name` — bare. Looked up in adapters first; resolves to
+    2. `adapter_name` - bare. Looked up in adapters first; resolves to
        (adapter.base_model.name, adapter.name).
-    3. `base_name` — bare. Looked up in models. If neither matches, raises.
+    3. `base_name` - bare. Looked up in models. If neither matches, raises.
     """
     # Form 1: composite
     if ":" in model_field:
@@ -141,7 +141,7 @@ async def ensure_adapter_loaded(
 
     Returns True if a load was triggered (the request paid hot-load
     latency, ~100-500ms), False if the adapter was already loaded.
-    Sub-project C's predictor uses this signal as `cold_loaded`."""
+    The predictor uses this signal as `cold_loaded`."""
     a = ad_store.get_by_name(conn, adapter_name)
     if a is None:
         raise UnknownModel(f"adapter {adapter_name!r} not registered")

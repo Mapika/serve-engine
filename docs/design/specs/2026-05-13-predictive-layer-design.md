@@ -1,10 +1,10 @@
-# Sub-project C — Predictive Pre-warming: Design
+# Workstream C - Predictive Pre-warming: Design
 
 **Status:** Draft, ready for review (written ahead of implementation
-overnight 2026-05-12 → 2026-05-13)
+overnight 2026-05-12 -> 2026-05-13)
 **Date:** 2026-05-13
-**Branch:** `feat/v2-loading` (lands after Sub-projects A and B)
-**Prerequisites:** Sub-projects A (adapters) and B (snapshots) complete
+**Branch:** `feat/v2-loading` (lands after Workstreams A and B)
+**Prerequisites:** Workstreams A (adapters) and B (snapshots) complete
 **Companion docs:** `2026-05-13-v2-narrative.md`,
 `2026-05-13-adapter-lifecycle-design.md`,
 `2026-05-13-snapshot-system-design.md`
@@ -12,23 +12,23 @@ overnight 2026-05-12 → 2026-05-13)
 ## 1. Goal
 
 The daemon learns your workload patterns and pre-warms models /
-adapters before requests arrive. Goal: ≥30% reduction in cold-load
+adapters before requests arrive. Goal: >=30% reduction in cold-load
 events vs v1's pure-LRU eviction on a representative production trace.
 
 The user-perceptible difference is "the model I asked for was already
 warm" instead of "I waited 30s for it to load." The mechanism is
-boring rule-based prediction over a usage history table; the magic is
+boring rule-based prediction over a usage history table; the practical part is
 that it's continuously running, federated (when D lands), and tied
 into the snapshot system from B so warm-up is cheap.
 
 ## 2. Non-goals
 
 - **Not:** training an ML model for prediction. v2.0 ships rule-based
-  prediction (time-of-day buckets, sequencing rules, key→model
+  prediction (time-of-day buckets, sequencing rules, key->model
   affinity). ML classifier may layer on later if rule-based isn't
   winning enough.
 - **Not:** prediction across boxes in v2.0. Federated demand awareness
-  is part of Sub-project D.
+  is part of Workstream D.
 - **Not:** speculative inference (running the same request on multiple
   models for latency hedging). Out of scope; engine-internals concern.
 - **Not:** changing the user's `--pin` semantics. Pinned models stay
@@ -39,7 +39,7 @@ into the snapshot system from B so warm-up is cheap.
 ## 3. Schema additions
 
 ```sql
--- Sub-project C (v2): per-request usage events for prediction.
+-- Workstream C (v2): per-request usage events for prediction.
 CREATE TABLE IF NOT EXISTS usage_events (
     id            INTEGER PRIMARY KEY,
     ts            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
     tokens_in     INTEGER NOT NULL DEFAULT 0,
     tokens_out    INTEGER NOT NULL DEFAULT 0,
     cold_loaded   INTEGER NOT NULL DEFAULT 0,  -- 1 = this request triggered a load
-    -- Federation-ready (Sub-project D will populate):
+    -- Federation-ready (Workstream D will populate):
     source_peer_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_events(ts);
@@ -59,7 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_base_ts ON usage_events(base_name, ts);
 CREATE INDEX IF NOT EXISTS idx_usage_key_ts ON usage_events(api_key_id, ts);
 ```
 
-Storage cost: ~150 bytes per event. 1k req/min × 60 × 24 × 30 days =
+Storage cost: ~150 bytes per event. 1k req/min x 60 x 24 x 30 days =
 ~6 GB worst case at the high end. With default 30-day retention plus
 opportunistic compaction (aggregating week-old events into a
 `usage_aggregates` table), expected steady-state ~500 MB.
@@ -69,13 +69,13 @@ opportunistic compaction (aggregating week-old events into a
 Three rules feeding one queue of "warm-this-now" candidates:
 
 ### Rule 1: Time-of-day affinity
-Bin the past 30 days into 168 (24×7) hour-of-week buckets. For each
+Bin the past 30 days into 168 (24x7) hour-of-week buckets. For each
 bucket, count base/adapter activations per (base, adapter). A
 candidate's score is its activation rate in the upcoming bucket. Top
 K candidates pre-warm.
 
 ### Rule 2: Sequencing
-Mine pairs (X → Y) where Y is loaded within T seconds of a request
+Mine pairs (X -> Y) where Y is loaded within T seconds of a request
 to X. If `P(Y | X within T)` exceeds threshold (default 30%), Y becomes
 a candidate when X is requested. Computed offline via background job
 (every hour).
@@ -123,7 +123,7 @@ plumb it through to the usage logger.
 
 This is the metric we optimize: `sum(cold_loaded) / count(*)` over a
 representative window. v1 baseline; with predictor on we want this to
-drop ≥30%.
+drop >=30%.
 
 ## 7. CLI surface
 
@@ -170,7 +170,7 @@ rules:
     idle_seconds: 300
 ```
 
-## 9. Integration with snapshots (Sub-project B)
+## 9. Integration with snapshots (Workstream B)
 
 When the predictor decides to pre-warm, the lifecycle manager's load
 path automatically takes the snapshot path if a matching snapshot
@@ -185,27 +185,27 @@ This means the predictor's value is highest when:
 If the predictor is wrong, we paid a few-second snapshot restore for
 nothing. Acceptable cost.
 
-## 10. Federation (Sub-project D will use)
+## 10. Federation (Workstream D will use)
 
 Schema column: `usage_events.source_peer_id`. When D lands, peers
 gossip their recent usage events, the predictor mines a federated
 view, and "preload on box B because box A's traffic predicts demand"
 becomes possible.
 
-For sub-project C: `source_peer_id` is always NULL.
+For workstream C: `source_peer_id` is always NULL.
 
 ## 11. Testing strategy
 
-- `test_predictor_rules.py` — each rule in isolation. Synthesize a
+- `test_predictor_rules.py` - each rule in isolation. Synthesize a
   usage_events trace, run the rule, assert the candidate set.
-- `test_predictor_combine.py` — three rules together; OR semantics;
+- `test_predictor_combine.py` - three rules together; OR semantics;
   score is max; dedup correctness.
-- `test_predictor_tick.py` — tick respects guardrails: max per tick,
+- `test_predictor_tick.py` - tick respects guardrails: max per tick,
   pinned protection, in-flight protection.
-- `test_predictor_replay.py` — replay-mode harness; given a sample
+- `test_predictor_replay.py` - replay-mode harness; given a sample
   trace, verify cold-load count under predictor-on vs baseline LRU.
-- Live verification: record real workload for ≥1 day, run
-  `serve predict --replay <log>`, expect ≥30% cold-load reduction.
+- Live verification: record real workload for >=1 day, run
+  `serve predict --replay <log>`, expect >=30% cold-load reduction.
 
 ## 12. Decisions I'm flagging for review
 
@@ -228,13 +228,13 @@ For sub-project C: `source_peer_id` is always NULL.
 - **Whether to record `cold_loaded` retroactively.** The proxy knows
   at dispatch time whether the deployment was already warm. But what
   if a hot-load was triggered by the predictor 5s before the request
-  arrived — is that "cold" or "warm"? Proposal: "warm" (the predictor
+  arrived - is that "cold" or "warm"? Proposal: "warm" (the predictor
   succeeded). cold_loaded=1 only if the request itself blocked on
   load.
 
 ## 13. What's intentionally NOT in scope
 
-- Federated demand prediction (Sub-project D)
+- Federated demand prediction (Workstream D)
 - ML-based predictor (rule-based first; ML if rules don't suffice)
 - Per-tenant prediction beyond API-key affinity
 - Speculative inference / latency hedging across models
@@ -243,7 +243,7 @@ For sub-project C: `source_peer_id` is always NULL.
 
 ## 14. Success criteria recap
 
-- `sum(cold_loaded) / count(*)` drops ≥30% vs v1 on a representative
+- `sum(cold_loaded) / count(*)` drops >=30% vs v1 on a representative
   workload trace.
 - Predictions are explainable via `serve predict`; operator can see
   why each candidate was picked.

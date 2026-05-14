@@ -1,6 +1,6 @@
-"""usage_events store tests (Sub-project C foundation).
+"""usage_events store tests (Workstream C foundation).
 
-Predictor logic (rules, scoring, replay harness) is NOT in scope here —
+Predictor logic (rules, scoring, replay harness) is NOT in scope here  -
 it lands when we wire up the Predictor task. These tests cover the
 data layer: insert, query, GC.
 """
@@ -110,7 +110,7 @@ def test_count_in_window_total_and_filtered(tmp_path):
 
 def test_cold_load_rate_in_window(tmp_path):
     conn = _fresh(tmp_path)
-    # 4 cold, 6 warm → 40% cold-load rate
+    # 4 cold, 6 warm -> 40% cold-load rate
     for _ in range(4):
         ue.record(conn, model_name="x", base_name="x", cold_loaded=True)
     for _ in range(6):
@@ -147,14 +147,14 @@ def test_purge_older_than(tmp_path):
     ue.record(conn, model_name="x", base_name="x")
     ue.record(conn, model_name="x", base_name="x")
     ue.record(conn, model_name="x", base_name="x")
-    # Future cutoff → all 3 rows are older → all deleted
+    # Future cutoff -> all 3 rows are older -> all deleted
     deleted = ue.purge_older_than(conn, before_iso="9999-12-31 23:59:59")
     assert deleted == 3
     assert ue.count_in_window(conn, since_iso=_ago_iso(3600)) == 0
 
 
 def test_purge_older_than_keeps_recent(tmp_path):
-    """Past cutoff → no rows are older → none deleted."""
+    """Past cutoff -> no rows are older -> none deleted."""
     conn = _fresh(tmp_path)
     ue.record(conn, model_name="x", base_name="x")
     deleted = ue.purge_older_than(conn, before_iso=_ago_iso(60))

@@ -183,7 +183,7 @@ async def test_proxy_400_when_no_model_field(app_with_active_deployment):
 
 @pytest.mark.asyncio
 async def test_proxy_forwards_upstream_500(tmp_path, monkeypatch):
-    """Engine returns 500 → proxy must return 500 (not silently 200)."""
+    """Engine returns 500 -> proxy must return 500 (not silently 200)."""
     from unittest.mock import AsyncMock, MagicMock
 
     from serve_engine.backends.vllm import VLLMBackend

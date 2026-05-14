@@ -77,7 +77,7 @@ def _build_islands(count: int) -> dict[int, frozenset[int]]:
 def read_topology() -> Topology:
     """Enumerate GPUs and detect NVLink islands. Cached for the process lifetime."""
     if pynvml is None:
-        log.warning("pynvml unavailable — no GPUs visible")
+        log.warning("pynvml unavailable - no GPUs visible")
         return Topology(gpus=[], _islands={})
 
     pynvml.nvmlInit()

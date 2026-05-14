@@ -39,7 +39,7 @@ class DeploymentPlan:
     # itself doesn't know about backend objects). Adapters loaded into this
     # deployment are tracked in the deployment_adapters junction table.
     max_loras: int = 0
-    # Max per-adapter LoRA rank this deployment supports — comes from the
+    # Max per-adapter LoRA rank this deployment supports - comes from the
     # operator's `-x '--max-lora-rank=N'`. 0 = unset; the runtime treats
     # 0 as the engine default (16 for vLLM/SGLang). The value is stored
     # on the deployment row so ensure_adapter_loaded can pre-flight an

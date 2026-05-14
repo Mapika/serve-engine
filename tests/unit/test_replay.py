@@ -1,6 +1,6 @@
 """LRU replay simulator + CLI export/replay smoke tests.
 
-The simulator is the headline metric: it backs the ≥30% cold-load reduction
+The simulator is the headline metric: it backs the >=30% cold-load reduction
 target by giving us an offline LRU baseline to compare recorded traces
 against. Behavior we lock down:
 - monotonic-clock sorting of out-of-order traces
@@ -50,7 +50,7 @@ def test_simulate_lru_first_miss_then_hits_same_adapter():
 
 
 def test_simulate_lru_evicts_lru_when_slots_full():
-    """With slots=2, a→b→c forces eviction of `a`; revisiting `a` is cold."""
+    """With slots=2, a->b->c forces eviction of `a`; revisiting `a` is cold."""
     events = [
         _ev("t1", "qwen3", "a"),
         _ev("t2", "qwen3", "b"),
@@ -67,12 +67,12 @@ def test_simulate_lru_recency_protects_against_eviction():
     events = [
         _ev("t1", "qwen3", "a"),
         _ev("t2", "qwen3", "b"),
-        _ev("t3", "qwen3", "a"),  # touches a — now b is LRU
+        _ev("t3", "qwen3", "a"),  # touches a - now b is LRU
         _ev("t4", "qwen3", "c"),  # evicts b
-        _ev("t5", "qwen3", "a"),  # still cached — hot
+        _ev("t5", "qwen3", "a"),  # still cached - hot
     ]
     r = simulate_lru(events, slots_per_base=2)
-    # misses: a, b, c, then a-revisit is a hit → 3 cold
+    # misses: a, b, c, then a-revisit is a hit -> 3 cold
     assert r.lru_cold == 3
 
 
@@ -82,7 +82,7 @@ def test_simulate_lru_caches_are_per_base():
     events = [
         _ev("t1", "qwen3", "foo"),
         _ev("t2", "llama", "foo"),
-        _ev("t3", "qwen3", "foo"),  # still in qwen3's cache → hit
+        _ev("t3", "qwen3", "foo"),  # still in qwen3's cache -> hit
     ]
     r = simulate_lru(events, slots_per_base=1)
     assert r.lru_cold == 2  # only the first two are cold
@@ -133,7 +133,7 @@ def test_simulate_lru_reduction_pct_positive_when_recorded_better_than_lru():
 
 
 def test_simulate_lru_reduction_zero_when_lru_baseline_zero():
-    """Empty trace → no LRU misses → reduction is 0, not a div-by-zero."""
+    """Empty trace -> no LRU misses -> reduction is 0, not a div-by-zero."""
     r = simulate_lru([], slots_per_base=4)
     assert r.reduction_pct == 0.0
 
@@ -148,7 +148,7 @@ def test_simulate_lru_rejects_nonpositive_slots():
 
 def _seed_usage_db(db_path: Path) -> None:
     """Build a minimal usage_events table at `db_path` for the CLI tests
-    to read. We deliberately don't run the migration loader — this is the
+    to read. We deliberately don't run the migration loader - this is the
     only column set the CLI reads."""
     conn = sqlite3.connect(db_path)
     conn.execute("""
@@ -226,7 +226,7 @@ def test_predict_replay_reports_comparison(tmp_path):
     # The header line shows the comparable subset is 3 events.
     assert "events (adapter-bearing):  3" in result.output
     assert "recorded cold-loads:       1" in result.output
-    # LRU misses: a (cold), b (cold), a (hit) → 2 cold
+    # LRU misses: a (cold), b (cold), a (hit) -> 2 cold
     assert "LRU baseline cold-loads:   2" in result.output
     # Reduction (2-1)/2 = 50%
     assert "reduction vs LRU:          50.0%" in result.output

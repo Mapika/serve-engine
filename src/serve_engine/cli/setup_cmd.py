@@ -18,12 +18,12 @@ def setup():
     typer.echo("Step 1: environment diagnostic")
     results = run_all()
     _, _, fail = summarise(results)
+    labels = {"ok": "OK", "warn": "WARN", "fail": "FAIL"}
     for r in results:
-        glyph = {"ok": "✓", "warn": "!", "fail": "✗"}[r.status]
-        typer.echo(f"  {glyph} {r.name}: {r.detail}")
+        typer.echo(f"  {labels[r.status]:<4} {r.name}: {r.detail}")
     if fail:
         typer.secho(
-            "\n✗ doctor reports failures; fix and re-run `serve setup`.",
+            "\nFAIL doctor reports failures; fix and re-run `serve setup`.",
             fg=typer.colors.RED, err=True,
         )
         raise typer.Exit(1)
@@ -49,7 +49,7 @@ def setup():
     typer.echo(f"  id:     {result['id']}")
     typer.echo(f"  secret: {result['secret']}")
     typer.echo()
-    typer.echo("Save this secret — it won't be shown again.")
+    typer.echo("Save this secret. It won't be shown again.")
     typer.echo()
     typer.secho(
         f"Done. Open http://127.0.0.1:{config.DEFAULT_PUBLIC_PORT}/ and paste the secret.",

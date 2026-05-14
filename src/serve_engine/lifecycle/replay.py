@@ -1,6 +1,6 @@
 """LRU baseline simulator for `serve predict --replay`.
 
-The predictor's success metric — ≥30% cold-load reduction vs an LRU baseline —
+The predictor's success metric - >=30% cold-load reduction vs an LRU baseline  -
 is hard to measure from production cold_loaded counters alone because they
 already reflect whatever pre-warming was happening at recording time. The
 replay tool answers "how would this trace have looked under naive LRU?" so

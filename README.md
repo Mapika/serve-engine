@@ -31,7 +31,7 @@ Not the focus:
 - Training
 - Multi-host tensor parallelism
 - Being a new inference engine
-- Making adapters or LoRA the product identity
+- Leading with adapters or LoRA
 - Replacing Kubernetes for large fleets
 
 ## Requirements
@@ -368,8 +368,8 @@ Current direction:
 - `docs/design/specs/2026-05-14-service-router-control-plane.md`
 
 Historical implementation notes live in `docs/design/plans/` and older files
-under `docs/design/specs/`. Adapter-first and snapshot-first notes are retained
-as history. The current direction is service routing and lifecycle control.
+under `docs/design/specs/`. Older adapter and snapshot notes are retained as
+history. The current direction is service routing and lifecycle control.
 
 ## Development
 

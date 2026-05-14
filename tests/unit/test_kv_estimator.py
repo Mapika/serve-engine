@@ -161,7 +161,7 @@ def test_text_config_nested_arch_fields(tmp_path):
         model_dir=tmp_path, max_model_len=65536, target_concurrency=8, dtype="auto",
     ))
     # Qwen3.6-35B-A3B at FP8 on-disk is ~35 GB. Estimate should be in the
-    # right order of magnitude — i.e. tens of GB, not hundreds of MB.
+    # right order of magnitude - i.e. tens of GB, not hundreds of MB.
     assert 25_000 < mb < 80_000, mb
 
 
@@ -179,7 +179,7 @@ def test_default_target_concurrency_scales_inversely_with_model_size(tmp_path):
     tiny_c = default_target_concurrency(tiny_dir, max_model_len=4096, dtype="bf16")
     big_c = default_target_concurrency(big_dir, max_model_len=4096, dtype="bf16")
     assert tiny_c > big_c
-    # And tiny should be well above the legacy default of 8 — that was the
+    # And tiny should be well above the legacy default of 8 - that was the
     # footgun we're fixing.
     assert tiny_c >= 32
 

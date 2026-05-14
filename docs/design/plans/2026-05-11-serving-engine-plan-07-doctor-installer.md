@@ -1,11 +1,11 @@
-# Serving Engine — Plan 07: Doctor + Installer + Daemon-as-Container
+# Serving Engine - Plan 07: Doctor + Installer + Daemon-as-Container
 
 **Goal:** Make installation and diagnosis trivial. Three deliverables:
 
-1. **`serve doctor`** — top-down environment check: CUDA driver, Docker, nvidia-container-toolkit, GPU enumeration, NVLink topology, port availability, `~/.serve` writability, HF_TOKEN, cached engine images, daemon status.
-2. **`serve setup`** — interactive first-run wizard: confirms doctor passes, creates the initial admin key, prints the web UI URL.
-3. **`install.sh`** — one-shot bootstrap: installs `uv` if missing, `uv tool install` the package, runs `serve doctor`, prints next steps. Lives at `scripts/install.sh`.
-4. **Daemon-as-container** — a `docker/daemon.Dockerfile` and `docker/daemon-compose.yml` for users who prefer Docker over a host install.
+1. **`serve doctor`** - top-down environment check: CUDA driver, Docker, nvidia-container-toolkit, GPU enumeration, NVLink topology, port availability, `~/.serve` writability, HF_TOKEN, cached engine images, daemon status.
+2. **`serve setup`** - interactive first-run wizard: confirms doctor passes, creates the initial admin key, prints the web UI URL.
+3. **`install.sh`** - one-shot bootstrap: installs `uv` if missing, `uv tool install` the package, runs `serve doctor`, prints next steps. Lives at `scripts/install.sh`.
+4. **Daemon-as-container** - a `docker/daemon.Dockerfile` and `docker/daemon-compose.yml` for users who prefer Docker over a host install.
 
 No new third-party libraries. Pure stdlib + `pynvml` (already a dep).
 
@@ -15,23 +15,23 @@ No new third-party libraries. Pure stdlib + `pynvml` (already a dep).
 
 ```
 serving-engine/
-├── src/serve_engine/
-│   ├── doctor/
-│   │   ├── __init__.py
-│   │   ├── checks.py             # NEW — each check is a function → CheckResult
-│   │   └── runner.py             # NEW — runs all checks, formats results
-│   ├── cli/
-│   │   ├── doctor_cmd.py         # NEW
-│   │   └── setup_cmd.py          # NEW
-│   └── ...
-├── docker/
-│   ├── daemon.Dockerfile         # NEW
-│   └── README.md                 # NEW
-├── scripts/
-│   └── install.sh                # NEW
-└── tests/
-    └── unit/
-        └── test_doctor.py        # NEW
+|-- src/serve_engine/
+|   |-- doctor/
+|   |   |-- __init__.py
+|   |   |-- checks.py             # NEW - each check is a function -> CheckResult
+|   |   +-- runner.py             # NEW - runs all checks, formats results
+|   |-- cli/
+|   |   |-- doctor_cmd.py         # NEW
+|   |   +-- setup_cmd.py          # NEW
+|   +-- ...
+|-- docker/
+|   |-- daemon.Dockerfile         # NEW
+|   +-- README.md                 # NEW
+|-- scripts/
+|   +-- install.sh                # NEW
++-- tests/
+    +-- unit/
+        +-- test_doctor.py        # NEW
 ```
 
 ---
@@ -40,7 +40,7 @@ serving-engine/
 
 **Files:** `src/serve_engine/doctor/__init__.py` (empty), `src/serve_engine/doctor/checks.py`, `tests/unit/test_doctor.py`
 
-A check returns `CheckResult(name, status, detail, fix)` where `status ∈ {"ok","warn","fail"}`.
+A check returns `CheckResult(name, status, detail, fix)` where `status in {"ok","warn","fail"}`.
 
 - [ ] **Tests**
 
@@ -341,7 +341,7 @@ import typer
 from serve_engine.cli import app
 from serve_engine.doctor.runner import run_all, summarise
 
-_GLYPH = {"ok": "✓", "warn": "!", "fail": "✗"}
+_GLYPH = {"ok": "OK", "warn": "!", "fail": "FAIL"}
 _COLOR = {"ok": typer.colors.GREEN, "warn": typer.colors.YELLOW, "fail": typer.colors.RED}
 
 
@@ -359,7 +359,7 @@ def doctor(json_out: bool = typer.Option(False, "--json")):
         color = _COLOR.get(r.status, typer.colors.WHITE)
         typer.secho(f"  {glyph}  {r.name:<20} {r.detail}", fg=color)
         if r.fix and r.status != "ok":
-            typer.echo(f"     → {r.fix}")
+            typer.echo(f"     -> {r.fix}")
     ok, warn, fail = summarise(results)
     typer.echo()
     typer.secho(
@@ -375,7 +375,7 @@ def _exit_code(results) -> int:
     return 0
 ```
 
-- [ ] **Register in `cli/__init__.py`** — add `doctor_cmd` to the import block in alphabetical position (between `daemon_cmd` and `key_cmd`).
+- [ ] **Register in `cli/__init__.py`** - add `doctor_cmd` to the import block in alphabetical position (between `daemon_cmd` and `key_cmd`).
 
 - [ ] **Commit**
 
@@ -384,7 +384,7 @@ python -c "from serve_engine.cli import doctor_cmd; print('ok')"
 pytest -v
 ruff check src/ tests/
 git add src/serve_engine/doctor/runner.py src/serve_engine/cli/doctor_cmd.py src/serve_engine/cli/__init__.py
-git commit -m "feat(cli): serve doctor — environment diagnostic"
+git commit -m "feat(cli): serve doctor - environment diagnostic"
 ```
 
 ---
@@ -417,11 +417,11 @@ def setup():
     results = run_all()
     _, _, fail = summarise(results)
     for r in results:
-        glyph = {"ok": "✓", "warn": "!", "fail": "✗"}[r.status]
+        glyph = {"ok": "OK", "warn": "!", "fail": "FAIL"}[r.status]
         typer.echo(f"  {glyph} {r.name}: {r.detail}")
     if fail:
         typer.secho(
-            "\n✗ doctor reports failures; fix and re-run `serve setup`.",
+            "\nFAIL doctor reports failures; fix and re-run `serve setup`.",
             fg=typer.colors.RED, err=True,
         )
         raise typer.Exit(1)
@@ -465,7 +465,7 @@ def setup():
     typer.echo(f"  id:     {result['id']}")
     typer.echo(f"  secret: {result['secret']}")
     typer.echo()
-    typer.echo("Save this secret — it won't be shown again.")
+    typer.echo("Save this secret - it won't be shown again.")
     typer.echo()
     typer.secho(
         f"Done. Open http://127.0.0.1:{config.DEFAULT_PUBLIC_PORT}/ and paste the secret.",
@@ -482,7 +482,7 @@ python -c "from serve_engine.cli import setup_cmd; print('ok')"
 pytest -v
 ruff check src/ tests/
 git add src/serve_engine/cli/setup_cmd.py src/serve_engine/cli/__init__.py
-git commit -m "feat(cli): serve setup — first-run wizard"
+git commit -m "feat(cli): serve setup - first-run wizard"
 ```
 
 ---
@@ -534,7 +534,7 @@ echo
 echo ">>> running serve doctor"
 if serve doctor; then
     echo
-    echo "✓ environment looks good. Next:"
+    echo "OK environment looks good. Next:"
     echo
     echo "    serve setup        # interactive wizard (recommended)"
     echo "    # or:"
@@ -606,7 +606,7 @@ CMD ["python3", "-m", "serve_engine.daemon", "--host", "0.0.0.0", "--port", "115
 ```markdown
 # Daemon-as-container
 
-This directory contains a Dockerfile to run the serve-engine daemon itself in a container. The daemon spawns engine containers (vLLM, SGLang) on the host's Docker — so the container must have access to the host Docker socket.
+This directory contains a Dockerfile to run the serve-engine daemon itself in a container. The daemon spawns engine containers (vLLM, SGLang) on the host's Docker - so the container must have access to the host Docker socket.
 
 ## Build
 
@@ -658,7 +658,7 @@ serve doctor
 
 Expect a mix of ok/warn for any missing engine images. Exit code 0 if no failures.
 
-- [ ] **Run `serve setup` (interactive — manual test)**
+- [ ] **Run `serve setup` (interactive - manual test)**
 
 ```bash
 serve daemon stop 2>/dev/null
@@ -674,11 +674,11 @@ serve setup
 bash -n scripts/install.sh
 ```
 
-(Full end-to-end of `install.sh` requires a clean machine — not run here.)
+(Full end-to-end of `install.sh` requires a clean machine - not run here.)
 
 ## Verification
 
-1. `pytest -v` — all tests pass.
+1. `pytest -v` - all tests pass.
 2. `ruff check src/ tests/` clean.
 3. `serve doctor` exits 0 on the H100 host.
 4. `serve setup` walks through doctor, daemon, key creation, prints URL.

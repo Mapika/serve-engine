@@ -26,17 +26,17 @@ class TRTLLMBackend(ContainerBackend):
 
     Flag naming convention is snake_case (--tp_size, not --tensor-parallel-size).
     The TensorRT-engine path requires an ahead-of-time `trtllm-build` step and
-    is not exposed here — use the PyTorch backend for parity with vLLM/SGLang.
+    is not exposed here - use the PyTorch backend for parity with vLLM/SGLang.
 
     Returns a per-deployment YAML config from `engine_config()` enabling
-    `print_iter_log` (so /metrics aggregates engine-level stats — kv-cache,
+    `print_iter_log` (so /metrics aggregates engine-level stats - kv-cache,
     batch fill, scheduler) and a CUDA-graph batch-size ladder sized to the
     plan's target_concurrency.
 
     LoRA adapter hot-load is NOT supported. TRT-LLM's adapter story lives
     on the legacy AOT-engine build path (trtllm-build), which is
     incompatible with the PyTorch-backend deployments we use. Tracked in
-    docs/design/specs/2026-05-13-adapter-lifecycle-design.md §6.
+    docs/design/specs/2026-05-13-adapter-lifecycle-design.md section6.
     """
 
     name = "trtllm"
@@ -75,9 +75,9 @@ class TRTLLMBackend(ContainerBackend):
     def engine_config(self, plan: DeploymentPlan) -> dict | None:
         return {
             # Populates /metrics on the PyTorch backend (TRT-LLM emits as JSON,
-            # not Prometheus exposition — our aggregator passes it through but
+            # not Prometheus exposition - our aggregator passes it through but
             # downstream callers must parse it themselves until we add a
-            # JSON→Prom translator).
+            # JSON->Prom translator).
             "enable_iter_perf_stats": True,
             # Mirrors NVIDIA's recommended throughput profile (also writes
             # per-iter logs to stdout for `serve logs` inspection).

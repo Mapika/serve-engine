@@ -51,7 +51,7 @@ export const api = {
   loadModel: (b: any) => jfetch<any>('POST', '/admin/deployments', b),
   createStreamToken: () => jfetch<{ token: string; expires_at: number }>('POST', '/admin/stream-token'),
 
-  // Adapters (Sub-project A)
+  // Adapter endpoints.
   listAdapters: () => jfetch<any[]>('GET', '/admin/adapters'),
   createAdapter: (b: { name: string; base_model_name: string; hf_repo: string; revision?: string }) =>
     jfetch<any>('POST', '/admin/adapters', b),
@@ -65,7 +65,7 @@ export const api = {
   hotUnloadAdapter: (depId: number, name: string) =>
     jfetch<void>('DELETE', `/admin/deployments/${depId}/adapters/${name}`),
 
-  // Predictor (Sub-project C)
+  // Predictor endpoints.
   predictorCandidates: () => jfetch<any[]>('GET', '/admin/predictor/candidates'),
   predictorStats: () => jfetch<any>('GET', '/admin/predictor/stats'),
 }

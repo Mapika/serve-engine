@@ -29,7 +29,7 @@ def test_headroom_effective_util_uses_max_of_three():
     assert util == pytest.approx(0.15)
     # Mid model: factor or +extra wins
     util = hr.effective_util(reserved_mb=40000, per_gpu_mb=80000)
-    # max(60000, 42048, 12000) = 60000 → 0.75
+    # max(60000, 42048, 12000) = 60000 -> 0.75
     assert util == pytest.approx(0.75)
     # Large model: factor still wins but clamped to 0.95
     util = hr.effective_util(reserved_mb=70000, per_gpu_mb=80000)

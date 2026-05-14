@@ -54,12 +54,12 @@ export default function Keys() {
             disabled={!name.trim() || create.isPending}
             onClick={() => create.mutate()}
           >
-            {create.isPending ? 'issuing…' : 'issue →'}
+            {create.isPending ? 'issuing...' : 'issue'}
           </button>
         </div>
         {lastSecret && (
           <div className="border border-accent/40 bg-[var(--accent-soft)] px-4 py-3 max-w-3xl">
-            <div className="label text-accent mb-2">save this — it won't be shown again</div>
+            <div className="label text-accent mb-2">save this; it won't be shown again</div>
             <code className="font-mono text-[13px] break-all">{lastSecret}</code>
           </div>
         )}
@@ -89,7 +89,7 @@ export default function Keys() {
                 <td className="text-mute tnum">{k.id}</td>
                 <td>{k.name}</td>
                 <td className="text-dim">{k.tier}</td>
-                <td className="text-mute">{k.prefix}…</td>
+                <td className="text-mute">{k.prefix}</td>
                 <td>
                   <span className={`dot ${k.revoked ? 'dot-failed' : 'dot-ready'}`} />
                   <span className={k.revoked ? 'text-err' : 'text-dim'}>

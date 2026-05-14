@@ -1,4 +1,4 @@
-"""Admin endpoint tests for adapter lifecycle (Sub-project A).
+"""Admin endpoint tests for adapter lifecycle (Workstream A).
 
 Covers /admin/adapters CRUD + the per-deployment hot-load/unload endpoints.
 Engine HTTP calls (load_lora_adapter / unload_lora_adapter on the
@@ -83,7 +83,7 @@ def _write_local_adapter_dir(root, *, rank: int = 8) -> str:
         "peft_type": "LORA",
     }))
     # vLLM also wants the weights file; a 1-byte placeholder is enough for
-    # the registry path — the engine call is mocked out at the httpx layer.
+    # the registry path - the engine call is mocked out at the httpx layer.
     (d / "adapter_model.safetensors").write_bytes(b"\x00")
     return str(d)
 

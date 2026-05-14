@@ -1,10 +1,10 @@
-# Sub-project B — Snapshot-based Fast Loads: Design
+# Workstream B - Snapshot Fast Loads: Design
 
 **Status:** Draft, ready for review (written ahead of implementation
-overnight 2026-05-12 → 2026-05-13)
+overnight 2026-05-12 -> 2026-05-13)
 **Date:** 2026-05-13
-**Branch:** `feat/v2-loading` (lands after Sub-project A)
-**Prerequisites:** Sub-project A (adapter lifecycle) complete and stable
+**Branch:** `feat/v2-loading` (lands after Workstream A)
+**Prerequisites:** Workstream A (adapter lifecycle) complete and stable
 **Companion docs:** `2026-05-13-v2-narrative.md`,
 `2026-05-13-adapter-lifecycle-design.md`
 
@@ -25,7 +25,7 @@ Snapshots make warm restore the common case.
   TRT-LLM. Old snapshots GC away.
 - **Not:** federation pull-on-demand here. Schema is federation-ready
   (snapshots advertise via the same gossip primitive as adapters), but
-  the cross-box pull/push lands in Sub-project D.
+  the cross-box pull/push lands in Workstream D.
 - **Not:** quantization-on-the-fly via snapshots. A snapshot reflects
   the engine's loaded state for one specific quant; we don't transform
   between quants.
@@ -41,7 +41,7 @@ snapshot_key = sha256(
 ```
 
 Two deployments with the same key share a snapshot. The key is
-deliberately conservative — small differences (e.g., changing
+deliberately conservative - small differences (e.g., changing
 `max_model_len` from 4096 to 8192) invalidate the snapshot because
 engine state encodes the KV-cache layout.
 
@@ -52,7 +52,7 @@ to have the same arch (already enforced by v1 placement).
 ## 4. Schema additions
 
 ```sql
--- Sub-project B (v2): snapshot index.
+-- Workstream B (v2): snapshot index.
 CREATE TABLE IF NOT EXISTS snapshots (
     id              INTEGER PRIMARY KEY,
     key             TEXT NOT NULL UNIQUE,           -- the snapshot_key hash
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
     size_mb         INTEGER NOT NULL,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_used_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- Federation-ready (Sub-project D will populate):
+    -- Federation-ready (Workstream D will populate):
     source_peer_id  TEXT,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -104,7 +104,7 @@ without making the data flow leak engine-specific assumptions outward.
   vLLM's torch.compile cache.
 
 ### TRT-LLM (PyTorch backend)
-- The legacy AOT path (trtllm-build) IS the snapshot — once you build
+- The legacy AOT path (trtllm-build) IS the snapshot - once you build
   an engine, restore is fast. But that path is deprecated by NVIDIA
   (LEGACY WARNING from session 2026-05-12).
 - The PyTorch backend has limited snapshot story today. Defer
@@ -114,7 +114,7 @@ without making the data flow leak engine-specific assumptions outward.
 
 **Decision:** v2.0-beta ships snapshot support for vLLM and SGLang
 only. TRT-LLM gets a `supports_snapshots = False` ClassVar (mirrors
-the `supports_adapters` pattern from Sub-project A). Reassess once
+the `supports_adapters` pattern from Workstream A). Reassess once
 NVIDIA's PyTorch-backend snapshot story matures.
 
 ## 6. Lifecycle integration
@@ -189,7 +189,7 @@ serve snapshot gc [--keep-last <N>] [--max-disk-gb <X>]
    # total disk at X GB (LRU within the cap). Defaults configurable.
 ```
 
-No `serve snapshot save` — saves are automatic post-load. Operators
+No `serve snapshot save` - saves are automatic post-load. Operators
 who want to force a fresh save can `serve stop && serve run`.
 
 ## 9. Snapshot eviction (the GC story)
@@ -205,11 +205,11 @@ unbounded. Defaults:
 - **Run GC opportunistically:** at daemon startup, after any save, and
   via cron-like background timer (every 6h).
 
-## 10. Federation hooks (Sub-project D will use)
+## 10. Federation hooks (Workstream D will use)
 
 Schema columns ready:
-- `snapshots.source_peer_id` — NULL = locally created.
-- `snapshots.updated_at` — last-write-wins reconciliation.
+- `snapshots.source_peer_id` - NULL = locally created.
+- `snapshots.updated_at` - last-write-wins reconciliation.
 
 When D lands:
 - Push: snapshot index entries (NOT the blob) gossip to peers on save.
@@ -221,22 +221,22 @@ When D lands:
 
 ## 11. Testing strategy
 
-- `test_snapshot_key.py` — key determinism: same plan inputs → same
-  key; any input changes → different key. Snapshot key must NOT
+- `test_snapshot_key.py` - key determinism: same plan inputs -> same
+  key; any input changes -> different key. Snapshot key must NOT
   include any non-deterministic fields (timestamps, peer IDs).
-- `test_snapshot_store.py` — CRUD; LRU eviction within quota.
-- `test_vllm_backend_snapshot.py` — `snapshot_load_argv` shape;
+- `test_snapshot_store.py` - CRUD; LRU eviction within quota.
+- `test_vllm_backend_snapshot.py` - `snapshot_load_argv` shape;
   `snapshot_mount` shape.
-- `test_sglang_backend_snapshot.py` — same for SGLang.
-- `test_lifecycle_snapshot_integration.py` — end-to-end: deploy a
-  model → snapshot saves → stop → re-deploy with same plan → snapshot
+- `test_sglang_backend_snapshot.py` - same for SGLang.
+- `test_lifecycle_snapshot_integration.py` - end-to-end: deploy a
+  model -> snapshot saves -> stop -> re-deploy with same plan -> snapshot
   restore path is taken. Uses mocked engine HTTP layer; verifies the
   argv contains the snapshot-load flag.
 
 Live verification (operator):
 - Deploy qwen3-0_6b on vLLM, time the load.
 - Stop, re-deploy with the same flags, time the second load.
-- Expect ≥3x speedup on the second load. (5x is the stretch goal.)
+- Expect >=3x speedup on the second load. (5x is the stretch goal.)
 
 ## 12. Decisions I'm flagging for review
 
@@ -251,12 +251,12 @@ Live verification (operator):
   contains a `manifest.json` (engine, version, original plan inputs,
   size) plus one or more cache subdirs (`torch_cache/`, `cuda_graphs/`,
   etc.). Operators can `du -sh ~/.serve/snapshots/*` to see costs.
-- **vLLM and SGLang exact flag names + cache-dir paths** — verify
+- **vLLM and SGLang exact flag names + cache-dir paths** - verify
   against pinned versions before locking. Each engine's docs are
   unstable here; prefer reading their actual CLI `--help` output in
   containers.
-- **CONFIGS_DIR / SNAPSHOTS_DIR layout in `~/.serve/`.** Sub-project A
-  added `~/.serve/configs/`. Sub-project B adds `~/.serve/snapshots/`.
+- **CONFIGS_DIR / SNAPSHOTS_DIR layout in `~/.serve/`.** Workstream A
+  added `~/.serve/configs/`. Workstream B adds `~/.serve/snapshots/`.
   At some point the directory tree should be documented in README.
 
 ## 13. What's intentionally NOT in scope

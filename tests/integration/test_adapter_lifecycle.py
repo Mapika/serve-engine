@@ -1,4 +1,4 @@
-"""End-to-end integration test for the adapter lifecycle (Sub-project A).
+"""End-to-end integration test for the adapter lifecycle (Workstream A).
 
 Drives the full HTTP stack (admin endpoints + OpenAI proxy + adapter
 router + lifecycle) against a fake engine that records every adapter
@@ -206,7 +206,7 @@ async def test_full_adapter_lifecycle_8_step_flow(app, tmp_path):
         load_calls = [c for c in fe.calls if c["op"] == "load"]
         assert len(load_calls) == 1 and load_calls[0]["name"] == "formal"
 
-        # --- Step 2: same adapter again — no second load ---
+        # --- Step 2: same adapter again - no second load ---
         r = await c.post(
             "/v1/chat/completions",
             json={"model": "formal", "messages": [{"role": "user", "content": "again"}]},
@@ -261,7 +261,7 @@ async def test_full_adapter_lifecycle_8_step_flow(app, tmp_path):
         assert pirate_load is not None
         assert casual_unload < pirate_load
 
-        # --- Step 6: re-request 'casual' — re-loaded; another LRU evicts ---
+        # --- Step 6: re-request 'casual' - re-loaded; another LRU evicts ---
         r = await c.post(
             "/v1/chat/completions",
             json={"model": "casual", "messages": [{"role": "user", "content": "back"}]},
@@ -269,7 +269,7 @@ async def test_full_adapter_lifecycle_8_step_flow(app, tmp_path):
         assert r.status_code == 200
         assert "casual" in fe.loaded
 
-        # --- Step 7: force-rm 'pirate' while loaded — engine sees unload ---
+        # --- Step 7: force-rm 'pirate' while loaded - engine sees unload ---
         r = await c.delete("/admin/adapters/pirate?force=true")
         assert r.status_code == 204
         assert "pirate" not in fe.loaded

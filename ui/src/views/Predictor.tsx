@@ -41,7 +41,7 @@ export default function Predictor() {
         <h2 className="text-2xl font-light tracking-tightish caret">predictor</h2>
         <div className="label">
           {enabled ? (
-            <>tick {s.tick_interval_s}s · adapter {s.max_prewarm_per_tick}/tick · base {s.max_base_prewarm_per_tick ?? 0}/tick</>
+            <>tick {s.tick_interval_s}s / adapter {s.max_prewarm_per_tick}/tick / base {s.max_base_prewarm_per_tick ?? 0}/tick</>
           ) : 'disabled'}
         </div>
       </header>
@@ -51,7 +51,7 @@ export default function Predictor() {
         <div className="grid grid-cols-5 gap-8 max-w-4xl">
           <Stat label="attempted" value={s.preloads_attempted} />
           <Stat label="succeeded" value={s.preloads_succeeded} />
-          <Stat label="success rate" value={adapterRate != null ? `${adapterRate}%` : '—'} dim />
+          <Stat label="success rate" value={adapterRate != null ? `${adapterRate}%` : '-'} dim />
           <Stat label="skipped (warm)" value={s.preloads_skipped_already_warm} dim />
           <Stat label="skipped (no dep)" value={s.preloads_skipped_no_deployment} dim />
         </div>
@@ -62,9 +62,9 @@ export default function Predictor() {
         <div className="grid grid-cols-5 gap-8 max-w-4xl">
           <Stat label="attempted" value={s.base_prewarms_attempted} />
           <Stat label="succeeded" value={s.base_prewarms_succeeded} />
-          <Stat label="success rate" value={baseRate != null ? `${baseRate}%` : '—'} dim />
+          <Stat label="success rate" value={baseRate != null ? `${baseRate}%` : '-'} dim />
           <Stat label="skipped (no plan)" value={s.base_prewarms_skipped_no_plan} dim />
-          <Stat label="—" value="—" dim />
+          <Stat label="-" value="-" dim />
         </div>
       </section>
 
@@ -82,7 +82,7 @@ export default function Predictor() {
             {cands.length === 0 && (
               <tr>
                 <td colSpan={3} className="!py-12 text-center text-mute">
-                  no candidates — rules have nothing to suggest right now
+                  no candidates. rules have nothing to suggest right now
                 </td>
               </tr>
             )}

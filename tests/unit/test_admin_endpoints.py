@@ -275,7 +275,7 @@ async def test_create_deployment_passes_extra_args_to_argv(app):
 @pytest.mark.asyncio
 async def test_predictor_candidates_endpoint(app):
     """/admin/predictor/candidates returns a list of {model, score, reason}.
-    With a fresh empty DB the list is empty — the endpoint should not 500."""
+    With a fresh empty DB the list is empty - the endpoint should not 500."""
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         r = await c.get("/admin/predictor/candidates")
@@ -300,7 +300,7 @@ async def test_predictor_stats_endpoint(app):
 @pytest.mark.asyncio
 async def test_create_deployment_409_when_replacing_pinned(app):
     """If a same-name deployment is already pinned, the daemon must return
-    a 4xx with the manager's "is pinned" message — not a 500 — so the CLI
+    a 4xx with the manager's "is pinned" message - not a 500 - so the CLI
     can show the actionable hint ("run `serve unpin <model>`")."""
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
@@ -420,7 +420,7 @@ async def test_create_deployment_default_backend_is_vllm(app):
                 "image_tag": "img:v1",
                 "gpu_ids": [0],
                 "max_model_len": 4096,
-                # no `backend` field — should default via selection
+                # no `backend` field - should default via selection
             },
         )
     assert r.status_code == 201
@@ -451,7 +451,7 @@ async def test_list_gpus_returns_list(app, monkeypatch):
 async def test_create_list_revoke_key(app):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
-        # Create admin key first (bypass is active at this point — no keys exist yet)
+        # Create admin key first (bypass is active at this point - no keys exist yet)
         r = await c.post("/admin/keys", json={"name": "alice", "tier": "admin"})
         assert r.status_code == 201
         body = r.json()
@@ -460,7 +460,7 @@ async def test_create_list_revoke_key(app):
         secret = body["secret"]
         auth = {"Authorization": f"Bearer {secret}"}
 
-        # Now a key exists — all subsequent admin requests must carry the bearer
+        # Now a key exists - all subsequent admin requests must carry the bearer
         r = await c.get("/admin/keys", headers=auth)
         assert r.status_code == 200
         names = [k["name"] for k in r.json()]
@@ -553,18 +553,18 @@ async def test_admin_route_requires_admin_tier(tmp_path, monkeypatch):
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-        # No bearer → 401
+        # No bearer -> 401
         r = await c.get("/admin/models")
         assert r.status_code == 401
 
-        # Standard-tier bearer → 403
+        # Standard-tier bearer -> 403
         r = await c.get(
             "/admin/models",
             headers={"Authorization": f"Bearer {std_secret}"},
         )
         assert r.status_code == 403
 
-        # Admin-tier bearer → 200
+        # Admin-tier bearer -> 200
         r = await c.get(
             "/admin/models",
             headers={"Authorization": f"Bearer {admin_secret}"},

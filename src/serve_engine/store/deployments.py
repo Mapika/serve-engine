@@ -28,7 +28,7 @@ class Deployment:
     idle_timeout_s: int | None
     vram_reserved_mb: int
     last_request_at: str | None
-    max_loras: int = 0  # 0 = LoRA disabled (Sub-project A v2)
+    max_loras: int = 0  # 0 = LoRA disabled
     max_lora_rank: int = 0  # 0 = unset; treat as engine default (16)
 
 

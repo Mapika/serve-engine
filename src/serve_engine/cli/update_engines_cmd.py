@@ -25,7 +25,7 @@ def update_engines(
         elif latest == m.pinned_tag:
             status = "up to date"
         else:
-            status = "→ update available"
+            status = "update available"
             updates[name] = {"pinned_tag": latest}
         typer.echo(f"{name:<10} {m.pinned_tag:<20} {(latest or '-'):<20} {status}")
 

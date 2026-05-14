@@ -59,7 +59,7 @@ class DockerClient:
         binding = port_bindings.get(f"{internal_port}/tcp")
         if not binding:
             # Container started but the port mapping isn't reported yet; this is rare
-            # but defensible — fall back to the internal port on the container name
+            # but defensible - fall back to the internal port on the container name
             # (only works if daemon is on the same docker network; documented limitation).
             host_port = internal_port
             address = name

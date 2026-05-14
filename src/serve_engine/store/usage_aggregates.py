@@ -2,7 +2,7 @@
 
 After `retention_days`, the rollup job collapses raw events into
 (base, adapter, hour_of_week) buckets here and drops the raw rows.
-Per design §12: keeps the predictor's storage bounded as the box runs
+Per design section12: keeps the predictor's storage bounded as the box runs
 for months.
 
 Schema: migration 008.
@@ -102,7 +102,7 @@ def rollup_old_events(
     """Aggregate every event with ts < before_iso into usage_aggregates,
     then DELETE the source rows. Returns counters for telemetry.
 
-    Done in a single transaction — partial rollups would re-count
+    Done in a single transaction - partial rollups would re-count
     events on retry. Uses SQLite's hour_of_week formula
     (weekday * 24 + hour) so the predictor's SQL filter agrees.
     """

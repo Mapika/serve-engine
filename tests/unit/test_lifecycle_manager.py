@@ -100,7 +100,7 @@ def test_load_evicts_previous_when_room_constrained(conn, monkeypatch, tmp_path,
 
 def test_load_stops_prior_deployment_of_same_name(conn, monkeypatch, tmp_path, topo_one_gpu):
     """`serve run X` must stop any existing ready deployment named X before
-    starting the new one — that's the CLI contract ("Stops the current
+    starting the new one - that's the CLI contract ("Stops the current
     model first"). Without this, two co-located deployments of the same
     base name burn extra VRAM and the proxy's find_ready_by_model_name
     routes to whichever has the newer started_at, masking config drift
@@ -112,7 +112,7 @@ def test_load_stops_prior_deployment_of_same_name(conn, monkeypatch, tmp_path, t
         ContainerHandle(id="cid2", name="x2", address="127.0.0.1", port=49153),
     ]
     # Small VRAM per deployment so both would fit on the 80 GB GPU under the
-    # current placement logic — placement will NOT evict on its own here.
+    # current placement logic - placement will NOT evict on its own here.
     _patch_externals(monkeypatch, tmp_path, vram_mb=10_000)
 
     mgr = LifecycleManager(
@@ -135,7 +135,7 @@ def test_load_stops_prior_deployment_of_same_name(conn, monkeypatch, tmp_path, t
 def test_pin_prevents_eviction(conn, monkeypatch, tmp_path, topo_one_gpu):
     """Pinned deployments are not LRU-evicted to make room for a different
     model. The second load is for a *different* model so the same-name
-    replacement path doesn't apply — this test is purely about placement.
+    replacement path doesn't apply - this test is purely about placement.
     """
     docker_client = MagicMock()
     docker_client.run.return_value = ContainerHandle(
@@ -161,7 +161,7 @@ def test_pin_prevents_eviction(conn, monkeypatch, tmp_path, topo_one_gpu):
 
 def test_load_refuses_to_replace_pinned_same_name(conn, monkeypatch, tmp_path, topo_one_gpu):
     """`serve run X` on a pinned X errors with a clear message instead of
-    silently replacing — pin is the operator's commitment that the
+    silently replacing - pin is the operator's commitment that the
     deployment is special. They must `serve unpin X` first.
     """
     docker_client = MagicMock()
@@ -213,7 +213,7 @@ def test_load_marks_failed_on_unhealthy(conn, monkeypatch, tmp_path, topo_one_gp
         asyncio.run(mgr.load(_make_plan()))
     docker_client.stop.assert_called_once()
     # Failed-load containers MUST be preserved (remove=False) so the engine
-    # logs survive for `docker logs` inspection — otherwise root cause is lost.
+    # logs survive for `docker logs` inspection - otherwise root cause is lost.
     stop_kwargs = docker_client.stop.call_args.kwargs
     assert stop_kwargs.get("remove") is False, stop_kwargs
     assert dep_store.find_active(conn) is None

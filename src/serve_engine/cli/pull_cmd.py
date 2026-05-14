@@ -26,7 +26,7 @@ def pull(
     """Register a model AND download its weights (use --skip-download to defer)."""
     local_name = name or hf_repo.split("/")[-1].lower()
 
-    # Register (idempotent — 409 from daemon means already there, which is fine).
+    # Register (idempotent - 409 from daemon means already there, which is fine).
     body = {"name": local_name, "hf_repo": hf_repo, "revision": revision}
     try:
         result = asyncio.run(ipc.post(config.SOCK_PATH, "/admin/models", json=body))
@@ -40,7 +40,7 @@ def pull(
             raise typer.Exit(1) from e
 
     if skip_download:
-        typer.echo("(skipping download — weights fetched at first `serve run`)")
+        typer.echo("(skipping download - weights fetched at first `serve run`)")
         return
 
     typer.echo(f"downloading {hf_repo}@{revision} ... (this may take a few minutes)")

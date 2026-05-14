@@ -24,7 +24,7 @@ class Denied:
 Decision = Allowed | Denied
 
 
-# (limit_attr, kind, window_s, label)  kind ∈ {"req","tok"}
+# (limit_attr, kind, window_s, label)  kind in {"req","tok"}
 _WINDOWS = [
     ("rpm", "req", 60, "rpm"),
     ("tpm", "tok", 60, "tpm"),

@@ -113,7 +113,7 @@ def test_delete(tmp_path):
 def test_base_model_added_after_adapter_with_same_name_is_rejected(tmp_path):
     """Disjoint-namespace symmetry: model_store.add must refuse a name
     that already exists as an adapter, and vice versa. Routing is
-    `model='x'` → look up; collisions would make this ambiguous."""
+    `model='x'` -> look up; collisions would make this ambiguous."""
     conn = _fresh(tmp_path)
     model_store.add(conn, name="qwen3-7b", hf_repo="Qwen/Qwen3-7B")
     ad_store.add(

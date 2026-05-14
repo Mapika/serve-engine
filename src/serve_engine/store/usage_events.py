@@ -1,7 +1,7 @@
-"""Usage-event log feeding the Sub-project C predictor.
+"""Usage-event log feeding the predictor.
 
 One row per request, written by the OpenAI proxy at dispatch time.
-Schema is intentionally minimal — the predictor reads from indexed
+Schema is intentionally minimal - the predictor reads from indexed
 columns only. Larger reasoning artifacts (per-token logs, full
 prompts) are out of scope; if we ever want them they go to a
 separate, opt-in `request_logs` table.
@@ -57,7 +57,7 @@ def record(
     tokens_out: int = 0,
     cold_loaded: bool = False,
 ) -> int:
-    """Insert one usage event. Hot path — called from the proxy on every
+    """Insert one usage event. Hot path - called from the proxy on every
     request. Keep this fast; no SELECTs, no JOINs. Returns the new row id
     so the caller can patch in token counts after the upstream stream
     completes (the proxy doesn't know them at dispatch time).
@@ -82,7 +82,7 @@ def set_tokens(
 ) -> None:
     """Patch in upstream-reported token counts after the stream completes.
     Called from the proxy's streamer finally-block, paired with the id
-    returned by `record()`. Idempotent — silently no-ops for unknown ids."""
+    returned by `record()`. Idempotent - silently no-ops for unknown ids."""
     conn.execute(
         "UPDATE usage_events SET tokens_in=?, tokens_out=? WHERE id=?",
         (tokens_in, tokens_out, event_id),
@@ -112,7 +112,7 @@ def cold_load_rate_in_window(
     conn: sqlite3.Connection, *, since_iso: str,
 ) -> float:
     """sum(cold_loaded) / count(*) over the window. The metric the
-    predictor optimizes — v1 LRU baseline → v2 with predictor on.
+    predictor optimizes - v1 LRU baseline -> v2 with predictor on.
     Returns 0.0 if the window is empty."""
     row = conn.execute(
         """

@@ -62,7 +62,7 @@ export default function Adapters() {
             >
               huggingface
             </button>
-            <span className="text-mute">·</span>
+            <span className="text-mute">/</span>
             <button
               onClick={() => setMode('local')}
               className={mode === 'local' ? 'text-ink' : 'text-mute hover:text-dim'}
@@ -92,7 +92,7 @@ export default function Adapters() {
             value={base}
             onChange={e => setBase(e.target.value)}
           >
-            <option value="">base model …</option>
+            <option value="">base model</option>
             {baseOptions.map((m: any) => (
               <option key={m.id} value={m.name}>{m.name}</option>
             ))}
@@ -109,7 +109,7 @@ export default function Adapters() {
               disabled={!hfRepo.trim() || !base || pull.isPending}
               onClick={() => pull.mutate()}
             >
-              {pull.isPending ? 'pulling…' : 'pull →'}
+              {pull.isPending ? 'pulling...' : 'pull'}
             </button>
           ) : (
             <button
@@ -117,7 +117,7 @@ export default function Adapters() {
               disabled={!localPath.trim() || !base || addLocal.isPending}
               onClick={() => addLocal.mutate()}
             >
-              {addLocal.isPending ? 'adding…' : 'add →'}
+              {addLocal.isPending ? 'adding...' : 'add'}
             </button>
           )}
         </div>
@@ -158,12 +158,12 @@ export default function Adapters() {
                 <td className="text-mute font-mono text-[11px]">
                   {a.hf_repo.startsWith('local:') ? 'local' : a.hf_repo}
                 </td>
-                <td className="text-right tnum">{a.lora_rank ?? '—'}</td>
+                <td className="text-right tnum">{a.lora_rank ?? '-'}</td>
                 <td className="text-right tnum">
-                  {a.size_mb != null ? `${a.size_mb} MB` : a.downloaded ? '—' : 'not pulled'}
+                  {a.size_mb != null ? `${a.size_mb} MB` : a.downloaded ? '-' : 'not pulled'}
                 </td>
                 <td className="text-mute tnum">
-                  {(a.loaded_into ?? []).length > 0 ? (a.loaded_into ?? []).join(',') : '—'}
+                  {(a.loaded_into ?? []).length > 0 ? (a.loaded_into ?? []).join(',') : '-'}
                 </td>
                 <td className="text-right">
                   <button

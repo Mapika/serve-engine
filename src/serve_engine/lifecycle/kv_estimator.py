@@ -69,7 +69,7 @@ def _estimate_param_bytes(cfg: dict, dtype_bytes: int) -> int:
     n_kv_heads = int(text.get("num_key_value_heads", n_heads))
     head_dim = int(text.get("head_dim", H // n_heads if n_heads else 0))
 
-    # Attention (Q/K/V/O) — GQA-aware.
+    # Attention (Q/K/V/O) - GQA-aware.
     q_proj = H * n_heads * head_dim
     kv_proj = H * n_kv_heads * head_dim * 2  # K and V
     o_proj = n_heads * head_dim * H
@@ -94,7 +94,7 @@ def _count_attention_layers(cfg: dict) -> int:
     """Count layers that hold a per-token KV cache.
 
     Hybrid models (Qwen3.6, Granite-Hybrid, etc.) list per-layer types as
-    "full_attention"/"linear_attention" under text_config.layer_types — only
+    "full_attention"/"linear_attention" under text_config.layer_types - only
     full-attention layers cache K/V per token; linear-attention layers hold a
     fixed-size state cache that doesn't scale with sequence length.
     """
@@ -122,11 +122,11 @@ def default_target_concurrency(
     (architecture-aware: GQA, hybrid layers, fp8) and divides the budget by
     the per-request KV footprint.
 
-    `kv_budget_mb` is a target, not a hard cap — placement+headroom downstream
+    `kv_budget_mb` is a target, not a hard cap - placement+headroom downstream
     enforce VRAM limits. Default 16 GB matches a comfortable single-deployment
     KV slice on workstation Blackwell / H100 PCIe; bump for dedicated H100 SXM.
 
-    Falls back to `floor` if the model config can't be read or is malformed —
+    Falls back to `floor` if the model config can't be read or is malformed  -
     the downstream estimator will still try to read it and will raise the
     actual error to the caller; this function should never block a load on
     its own.

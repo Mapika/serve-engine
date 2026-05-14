@@ -1,4 +1,4 @@
--- Sub-project A follow-up: catch LoRA rank mismatches before they
+-- Catch LoRA rank mismatches before they
 -- become engine-side 502s.
 --   `adapters.lora_rank`: extracted from the adapter's PEFT
 --     adapter_config.json at pull/download time. NULL when the adapter

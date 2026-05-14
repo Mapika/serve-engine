@@ -14,7 +14,7 @@ class AlreadyExists(Exception):
 class NameCollision(Exception):
     """Adapter name collides with a base model (or vice versa).
 
-    Adapters and base models share the routing namespace — clients say
+    Adapters and base models share the routing namespace - clients say
     `model='x'` and the proxy resolves to whichever has that name. We
     refuse the registration up front rather than letting routing be
     ambiguous later.

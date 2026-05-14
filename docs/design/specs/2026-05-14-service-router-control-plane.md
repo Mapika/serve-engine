@@ -1,4 +1,4 @@
-# serve-engine — Service Router Control Plane
+# serve-engine Service Router Control Plane
 
 **Status:** Accepted direction
 **Date:** 2026-05-14
@@ -162,8 +162,7 @@ current model/deployment compatibility surface.
 - Not a full Kubernetes platform.
 - Not multi-node tensor-parallel inference across hosts.
 - Not training or fine-tuning.
-- Not adapter-first as a product identity; adapters remain a supported
-  capability.
+- Adapters are a supported capability, not the lead surface.
 
 ## Product Language
 

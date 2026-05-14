@@ -11,8 +11,8 @@ class VLLMBackend(ContainerBackend):
         env = super().container_env(plan)
         if plan.max_loras > 0:
             # vLLM's /v1/load_lora_adapter is gated behind this env var by
-            # default for safety. We unlock it whenever the deployment
-            # opted into LoRA — the daemon owns access to the endpoint
+            # default for safety. Enable it whenever the deployment
+            # opted into LoRA - the daemon owns access to the endpoint
             # behind admin-only auth, so external misuse isn't a concern.
             env["VLLM_ALLOW_RUNTIME_LORA_UPDATING"] = "true"
         return env

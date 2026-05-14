@@ -1,10 +1,10 @@
-# Serving Engine — Plan 03: SGLang Backend
+# Serving Engine - Plan 03: SGLang Backend
 
-**Goal:** Add SGLang as a second engine backend. Validate the `Backend` Protocol we built in Plan 01 actually pluggable. Engine selection is data-driven via YAML — autotune logic is parked.
+**Goal:** Add SGLang as a second engine backend. Validate the `Backend` Protocol we built in Plan 01 actually pluggable. Engine selection is data-driven via YAML - autotune logic is parked.
 
-**Architecture:** New `SGLangBackend` class implementing the same `Backend` Protocol as `VLLMBackend`. A `backends.yaml` manifest pins upstream image tags. A `selection.yaml` maps model patterns → preferred engine. The manager picks the backend either from `--engine` CLI flag, the selection rules, or default vLLM.
+**Architecture:** New `SGLangBackend` class implementing the same `Backend` Protocol as `VLLMBackend`. A `backends.yaml` manifest pins upstream image tags. A `selection.yaml` maps model patterns -> preferred engine. The manager picks the backend either from `--engine` CLI flag, the selection rules, or default vLLM.
 
-**Tech Stack:** Same as Plans 01/02. New upstream image: `lmsysorg/sglang`. Note SGLang's launch command differs from vLLM — different argv shape — so this exercises the abstraction.
+**Tech Stack:** Same as Plans 01/02. New upstream image: `lmsysorg/sglang`. Note SGLang's launch command differs from vLLM - different argv shape - so this exercises the abstraction.
 
 ---
 
@@ -12,24 +12,24 @@
 
 ```
 serving-engine/
-├── src/serve_engine/
-│   ├── backends/
-│   │   ├── backends.yaml         # NEW — pinned image manifest
-│   │   ├── selection.yaml        # NEW — model-pattern → preferred backend
-│   │   ├── selection.py          # NEW — pure-Python pattern matcher
-│   │   └── sglang.py             # NEW — SGLangBackend
-│   ├── lifecycle/
-│   │   └── manager.py            # MODIFIED — uses Backend.from_manifest()
-│   ├── daemon/
-│   │   ├── __main__.py           # MODIFIED — load both backends
-│   │   ├── admin.py              # MODIFIED — accept engine + selection override
-│   │   └── app.py                # MODIFIED — backends dict gets both
-│   └── cli/
-│       └── run_cmd.py            # MODIFIED — --engine flag
-└── tests/
-    └── unit/
-        ├── test_sglang_backend.py     # NEW
-        └── test_selection.py          # NEW
+|-- src/serve_engine/
+|   |-- backends/
+|   |   |-- backends.yaml         # NEW - pinned image manifest
+|   |   |-- selection.yaml        # NEW - model-pattern -> preferred backend
+|   |   |-- selection.py          # NEW - pure-Python pattern matcher
+|   |   +-- sglang.py             # NEW - SGLangBackend
+|   |-- lifecycle/
+|   |   +-- manager.py            # MODIFIED - uses Backend.from_manifest()
+|   |-- daemon/
+|   |   |-- __main__.py           # MODIFIED - load both backends
+|   |   |-- admin.py              # MODIFIED - accept engine + selection override
+|   |   +-- app.py                # MODIFIED - backends dict gets both
+|   +-- cli/
+|       +-- run_cmd.py            # MODIFIED - --engine flag
++-- tests/
+    +-- unit/
+        |-- test_sglang_backend.py     # NEW
+        +-- test_selection.py          # NEW
 ```
 
 ---
@@ -73,7 +73,7 @@ git add src/serve_engine/backends/backends.yaml
 git commit -m "feat(backends): YAML manifest pinning vLLM v0.20.2 + SGLang v0.5.5.post1"
 ```
 
-(No tests yet — Task 2 introduces the consumer.)
+(No tests yet - Task 2 introduces the consumer.)
 
 ---
 
@@ -83,7 +83,7 @@ git commit -m "feat(backends): YAML manifest pinning vLLM v0.20.2 + SGLang v0.5.
 - Create: `src/serve_engine/backends/sglang.py`
 - Create: `tests/unit/test_sglang_backend.py`
 
-SGLang's launch command is `python -m sglang.launch_server` — different from vLLM's `vllm serve`. Their official image's ENTRYPOINT IS the launcher, so we just pass argv (same shape as vLLM).
+SGLang's launch command is `python -m sglang.launch_server` - different from vLLM's `vllm serve`. Their official image's ENTRYPOINT IS the launcher, so we just pass argv (same shape as vLLM).
 
 Key argv differences from vLLM (researched against SGLang's `launch_server --help`):
 - `--model-path` instead of `--model`
@@ -153,9 +153,9 @@ def test_internal_port():
     assert SGLangBackend.internal_port == 30000
 ```
 
-Run `pytest tests/unit/test_sglang_backend.py -v` → FAIL (module missing).
+Run `pytest tests/unit/test_sglang_backend.py -v` -> FAIL (module missing).
 
-(Note: `DeploymentPlan.backend` is typed `Literal["vllm"]` from Plan 01 / 02. Task 3 in this plan widens `SUPPORTED_BACKENDS` to include `"sglang"`. Until that lands, the test above will fail at `DeploymentPlan(...)` construction. That's fine — write the tests for the eventual signature; they pass after Task 3.)
+(Note: `DeploymentPlan.backend` is typed `Literal["vllm"]` from Plan 01 / 02. Task 3 in this plan widens `SUPPORTED_BACKENDS` to include `"sglang"`. Until that lands, the test above will fail at `DeploymentPlan(...)` construction. That's fine - write the tests for the eventual signature; they pass after Task 3.)
 
 - [ ] **Step 2: Implement `src/serve_engine/backends/sglang.py`**
 
@@ -214,7 +214,7 @@ class SGLangBackend:
         }
 ```
 
-- [ ] **Step 3: Commit (tests still failing — Task 3 fixes plan validation)**
+- [ ] **Step 3: Commit (tests still failing - Task 3 fixes plan validation)**
 
 ```bash
 git add src/serve_engine/backends/sglang.py tests/unit/test_sglang_backend.py
@@ -303,7 +303,7 @@ internal_port=backend.internal_port,
 
 - [ ] **Step 5: Update `tests/unit/test_plan.py` `test_plan_backend_must_be_supported`**
 
-The current test uses `backend="trt-llm"`. Keep it — sglang now passes validation, but trt-llm still fails. The test asserts on the error message; it should still pass since `trt-llm` isn't in `("vllm", "sglang")`.
+The current test uses `backend="trt-llm"`. Keep it - sglang now passes validation, but trt-llm still fails. The test asserts on the error message; it should still pass since `trt-llm` isn't in `("vllm", "sglang")`.
 
 - [ ] **Step 6: Run tests**
 
@@ -330,12 +330,12 @@ git commit -m "feat(backends): widen plan.backend to sglang + Backend.internal_p
 - Create: `src/serve_engine/backends/selection.py`
 - Create: `tests/unit/test_selection.py`
 
-Picks the preferred backend for a model name. Static patterns, no machine learning. Order: explicit user flag → first matching pattern → default (vllm).
+Picks the preferred backend for a model name. Static patterns, no machine learning. Order: explicit user flag -> first matching pattern -> default (vllm).
 
 - [ ] **Step 1: Write `src/serve_engine/backends/selection.yaml`**
 
 ```yaml
-# Model-pattern → preferred backend. First match wins.
+# Model-pattern -> preferred backend. First match wins.
 # Patterns are case-insensitive fnmatch globs.
 #
 # Defaults to vLLM unless a rule matches. Override per-request with `--engine`.
@@ -513,7 +513,7 @@ class CreateDeploymentRequest(BaseModel):
     model_name: str
     hf_repo: str
     revision: str = "main"
-    backend: str | None = None   # default → selection rules
+    backend: str | None = None   # default -> selection rules
     image_tag: str | None = None
     gpu_ids: list[int]
     tensor_parallel: int | None = None
@@ -559,7 +559,7 @@ async def test_create_deployment_default_backend_is_vllm(app):
                 "image_tag": "img:v1",
                 "gpu_ids": [0],
                 "max_model_len": 4096,
-                # no `backend` field — should default via selection
+                # no `backend` field - should default via selection
             },
         )
     assert r.status_code == 201
@@ -567,7 +567,7 @@ async def test_create_deployment_default_backend_is_vllm(app):
     assert body["backend"] == "vllm"
 ```
 
-The test fixture in `test_admin_endpoints.py` constructs `backends={"vllm": VLLMBackend()}` — that's fine. For Plan 03 we will also pass `sglang` in real startup (Task 6), but the test doesn't require it.
+The test fixture in `test_admin_endpoints.py` constructs `backends={"vllm": VLLMBackend()}` - that's fine. For Plan 03 we will also pass `sglang` in real startup (Task 6), but the test doesn't require it.
 
 - [ ] **Step 3: Run tests, ruff, commit**
 
@@ -650,7 +650,7 @@ git commit -m "feat(cli): --engine flag overrides backend selection"
 
 ---
 
-## Task 8: Smoke v3 — load same model on both engines
+## Task 8: Smoke v3 - load same model on both engines
 
 **Files:**
 - Create: `scripts/smoke_p03_engines.sh`
@@ -665,7 +665,7 @@ set -euo pipefail
 
 # Plan 03 smoke: same model, two engines back-to-back.
 # Prereqs same as smoke_e2e.sh + lmsysorg/sglang image cached (or
-# pulled on first use — that takes ~3-5 min).
+# pulled on first use - that takes ~3-5 min).
 
 cleanup() {
     serve stop 2>/dev/null || true
@@ -705,13 +705,13 @@ git commit -m "test: Plan 03 smoke (same model, two engines)"
 
 ## Verification (end of Plan 03)
 
-1. `pytest -v` — all tests pass.
-2. `ruff check src/ tests/` — clean.
-3. `bash scripts/smoke_p03_engines.sh` on H100 — exits 0 with PASS.
+1. `pytest -v` - all tests pass.
+2. `ruff check src/ tests/` - clean.
+3. `bash scripts/smoke_p03_engines.sh` on H100 - exits 0 with PASS.
 
 ## Self-review
 
 - **Spec coverage:** SGLang backend (T2), selection rules (T4), engine pluggability (T3 internal_port), CLI `--engine` (T7), smoke (T8). Backend manifest (T1) lays groundwork for Plan 08's `serve update-engines`.
-- **No autotune logic** — selection is purely static patterns. Correct per the parked-autotune decision.
+- **No autotune logic** - selection is purely static patterns. Correct per the parked-autotune decision.
 - **Placeholder scan:** none.
 - **Forward compat:** `SGLangBackend.container_kwargs` matches `VLLMBackend`'s shape. Adding TRT-LLM in a future plan is now demonstrably one new file.

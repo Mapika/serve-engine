@@ -1,7 +1,7 @@
--- Sub-project C (v2): per-request usage events for predictive pre-warming.
+-- Per-request usage events for predictive pre-warming.
 -- Each request inserts one row at dispatch time; the predictor mines this
 -- table for time-of-day, sequencing, and key-affinity patterns.
--- Federation-ready (source_peer_id) populated NULL until Sub-project D.
+-- source_peer_id is NULL until peer sync exists.
 -- Companion design: docs/design/specs/2026-05-13-predictive-layer-design.md
 
 CREATE TABLE IF NOT EXISTS usage_events (
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
     tokens_in       INTEGER NOT NULL DEFAULT 0,
     tokens_out      INTEGER NOT NULL DEFAULT 0,
     cold_loaded     INTEGER NOT NULL DEFAULT 0,
-    -- Federation-ready (Sub-project D will populate):
+    -- Future peer sync fields:
     source_peer_id  TEXT
 );
 

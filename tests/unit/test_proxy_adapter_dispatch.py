@@ -71,7 +71,7 @@ def _make_engine_intercept(monkeypatch, app):
     # Patch the engine-stream factory so /v1/chat/completions returns
     # a controlled body without needing a real engine. Need a duck-typed
     # response that supports aiter_raw() since the proxy iterates over it
-    # — full httpx.Response with `content=` consumes the stream eagerly.
+    # - full httpx.Response with `content=` consumes the stream eagerly.
     class FakeResponse:
         def __init__(self, body: bytes, content_type: str = "application/json"):
             self.status_code = 200
@@ -130,7 +130,7 @@ def _make_engine_intercept(monkeypatch, app):
 
 
 def _seed_with_rank(app, *, deployment_max_lora_rank: int):
-    """Like _seed() but sets the deployment's max_lora_rank — what the
+    """Like _seed() but sets the deployment's max_lora_rank - what the
     operator would have passed via -x '--max-lora-rank=N'."""
     conn = app.state.conn
     base = model_store.add(conn, name="qwen3-test", hf_repo="o/qwen3")
@@ -151,7 +151,7 @@ def _seed_with_rank(app, *, deployment_max_lora_rank: int):
 async def test_proxy_populates_usage_events_tokens_in_streaming_mode(app, monkeypatch):
     """In SSE streaming mode, OpenAI/vLLM/SGLang emit the usage chunk
     BEFORE the terminal `data: [DONE]` frame. The tracker must keep the
-    usage-bearing event, not the [DONE] sentinel — otherwise the
+    usage-bearing event, not the [DONE] sentinel - otherwise the
     predictor sees 0/0 for every streaming request."""
     _seed(app, max_loras=0)
     captured = {"chats": []}
@@ -403,7 +403,7 @@ async def test_proxy_allows_adapter_within_max_lora_rank(
     app, monkeypatch, tmp_path,
 ):
     """Compatible adapter (rank <= deployment's max_lora_rank) loads
-    normally — this is the regression check that the pre-flight doesn't
+    normally - this is the regression check that the pre-flight doesn't
     over-trigger."""
     _, _ = _seed_with_rank(app, deployment_max_lora_rank=64)
     a = ad_store.add(
@@ -507,7 +507,7 @@ async def test_proxy_composite_form_rewrites_model_to_adapter(app, monkeypatch, 
 
 @pytest.mark.asyncio
 async def test_proxy_503_for_adapter_with_no_lora_deployment(app, monkeypatch):
-    """Adapter exists but no deployment has --max-loras > 0 → clear 503."""
+    """Adapter exists but no deployment has --max-loras > 0 -> clear 503."""
     _seed(app, max_loras=0)
     ad_store.add(
         app.state.conn, name="x", base_model_name="qwen3-test", hf_repo="o/lora",

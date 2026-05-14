@@ -90,7 +90,7 @@ async def test_events_handler_returns_streaming_response(app_with_bus):
 
     The previous test exercises the bus subscribe/publish logic but never
     invokes admin.events() itself. That gap let `_SSE` (an undefined symbol
-    at admin.py:395) ship to production — `/admin/events` raised NameError
+    at admin.py:395) ship to production - `/admin/events` raised NameError
     on first request, breaking the dashboard event feed. This test calls
     the handler directly and pulls chunks from the body iterator, so any
     name-resolution or import bug surfaces here.
@@ -110,7 +110,7 @@ async def test_events_handler_returns_streaming_response(app_with_bus):
 
     bus = app_with_bus.state.event_bus
     aiter = response.body_iterator.__aiter__()
-    # First yield is the initial `:ok` heartbeat — pulling it ensures the
+    # First yield is the initial `:ok` heartbeat - pulling it ensures the
     # bus subscription is registered before we publish.
     head = await asyncio.wait_for(aiter.__anext__(), timeout=1.5)
     assert ":ok" in (head.decode() if isinstance(head, bytes) else head)
@@ -132,7 +132,7 @@ async def test_events_handler_returns_streaming_response(app_with_bus):
 
 @pytest.mark.asyncio
 async def test_engine_logs_handler_returns_streaming_response(tmp_path):
-    """Regression: /admin/deployments/{id}/logs/stream — same coverage gap.
+    """Regression: /admin/deployments/{id}/logs/stream - same coverage gap.
 
     The dashboard's engine-logs page (commit 1eb0f3c) hits this endpoint;
     it would have crashed with NameError under the same `_SSE` bug.

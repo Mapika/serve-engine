@@ -1,9 +1,9 @@
-# Sub-project A — Adapter-First Lifecycle: Design
+# Workstream A - Adapter Lifecycle: Design
 
 **Status:** Draft, ready for review
 **Date:** 2026-05-13
 **Branch:** `feat/v2-loading`
-**Sequence:** First sub-project of v2 (precedes B Snapshots, C Predictive, D Federation)
+**Sequence:** First workstream of v2 (precedes B Snapshots, C Predictive, D Federation)
 **Companion docs:** `2026-05-13-v2-narrative.md`
 
 ## 1. Goal
@@ -12,7 +12,7 @@ Make LoRA / DoRA adapters first-class entities alongside base models.
 Operators register adapters; clients address them by name in OpenAI
 requests; the daemon routes the request to a deployment that has the
 right base + adapter loaded; adapters hot-swap per request in
-milliseconds — orders of magnitude cheaper than full model swaps.
+milliseconds - orders of magnitude cheaper than full model swaps.
 
 This is the highest-leverage v2 feature for single-box users. Today,
 "swapping models" means a 30-120s container restart. Tomorrow,
@@ -29,8 +29,8 @@ a base that's already warm.
   clear error.
 - **Not:** cross-engine adapter portability. Adapter trained for vLLM
   loading is loaded by vLLM. We don't translate formats.
-- **Not:** federation in this sub-project. Schema is designed
-  federation-ready; sync is implemented in Sub-project D.
+- **Not:** federation in this workstream. Schema is designed
+  federation-ready; sync is implemented in Workstream D.
 - **Not:** adapter composition (multiple adapters merged per request).
   Engines don't reliably support this; out of scope.
 
@@ -47,7 +47,7 @@ CREATE TABLE adapters (
     local_path   TEXT,                         -- populated after download
     size_mb      INTEGER,                      -- populated after download
     created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- Federation-ready (Sub-project D will populate):
+    -- Federation-ready (Workstream D will populate):
     source_peer_id TEXT,                       -- NULL = locally registered
     updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -72,8 +72,8 @@ ALTER TABLE deployments ADD COLUMN max_loras INTEGER DEFAULT 0;
 -- 0 = LoRA disabled; >0 = engine started with --enable-lora --max-loras N
 ```
 
-Migration: idempotent additive — `CREATE TABLE IF NOT EXISTS`,
-`ALTER TABLE … ADD COLUMN` guarded by checking `pragma_table_info`.
+Migration: idempotent additive - `CREATE TABLE IF NOT EXISTS`,
+`ALTER TABLE ... ADD COLUMN` guarded by checking `pragma_table_info`.
 
 ## 4. CLI surface
 
@@ -102,7 +102,7 @@ serve run <base-name-or-repo> --max-loras <N>
    # disabled). Recommended: 4-8 for typical workloads.
 ```
 
-Inference clients see no new CLI — they just say
+Inference clients see no new CLI - they just say
 `model='my-adapter-v3'` (or `model='qwen3-7b:my-adapter-v3'`) in their
 OpenAI request.
 
@@ -168,13 +168,13 @@ OpenAI proxy (`/v1/chat/completions`, `/v1/completions`,
   Slot count derived from how many `--lora-paths` entries exist.
 - Dynamic loading: SGLang v0.5.x has `/load_lora_adapter` and
   `/unload_lora_adapter` (similar shape to vLLM but slightly different
-  payload — needs verification against the pinned tag).
+  payload - needs verification against the pinned tag).
 - Inference: same `model=lora_name` convention.
 
 ### TRT-LLM
 - Adapter support exists for the legacy AOT-engine path but is fragile
   and incompatible with the PyTorch backend we use. Out of scope for
-  this sub-project. Backend's `engine_config()` does NOT advertise
+  this workstream. Backend's `engine_config()` does NOT advertise
   adapter support; the lifecycle returns 409 if a user tries to load
   an adapter into a TRT-LLM deployment.
 - Backend gets a `supports_adapters: bool = False` class attribute.
@@ -183,7 +183,7 @@ OpenAI proxy (`/v1/chat/completions`, `/v1/completions`,
 
 ## 7. Routing (proxy changes)
 
-Today the proxy resolves `model` → deployment via
+Today the proxy resolves `model` -> deployment via
 `dep_store.find_ready_by_model_name`. New flow:
 
 ```
@@ -212,10 +212,10 @@ def resolve_target(model_field: str) -> tuple[Deployment, str | None]:
 1. Prefer a ready deployment of `base` with `adapter` already loaded
    (junction table lookup).
 2. Else: prefer a ready deployment of `base` with LoRA enabled
-   (`max_loras > 0`) and a free adapter slot — hot-load the adapter
+   (`max_loras > 0`) and a free adapter slot - hot-load the adapter
    into it.
 3. Else: prefer a ready deployment of `base` with LoRA enabled and full
-   slots — evict the LRU adapter from that deployment, hot-load this
+   slots - evict the LRU adapter from that deployment, hot-load this
    one.
 4. Else: trigger a new deployment of `base` with LoRA enabled.
 
@@ -243,10 +243,10 @@ adapter-level pin in v2.0; can add later if requested.
 
 ## 9. Federation hooks (designed in, NOT implemented here)
 
-Schema fields ready for Sub-project D:
-- `adapters.source_peer_id` — NULL = locally registered, else the peer
+Schema fields ready for Workstream D:
+- `adapters.source_peer_id` - NULL = locally registered, else the peer
   UUID where this adapter was first registered.
-- `adapters.updated_at` — used for last-write-wins reconciliation.
+- `adapters.updated_at` - used for last-write-wins reconciliation.
 
 When D lands:
 - Push: when an adapter is added/modified locally, push to peers.
@@ -255,32 +255,32 @@ When D lands:
 - Conflict: if two peers register an adapter with the same name
   independently, the one with the later `updated_at` wins.
 
-For sub-project A: those columns are populated only with NULL /
+For workstream A: those columns are populated only with NULL /
 local-time. The sync logic stays empty. The schema is correct so D
 can be additive.
 
 ## 10. Testing strategy
 
 Unit tests:
-- `test_adapter_store.py` — CRUD, by-name lookup, base validation
-- `test_adapter_routing.py` — `resolve_target` for all 4 routing cases
+- `test_adapter_store.py` - CRUD, by-name lookup, base validation
+- `test_adapter_routing.py` - `resolve_target` for all 4 routing cases
   (composite, bare adapter, bare base, missing); `find_deployment_for`
   preference ordering
-- `test_adapter_eviction.py` — LRU within deployment, no spillover
+- `test_adapter_eviction.py` - LRU within deployment, no spillover
   to base eviction
-- `test_vllm_backend_lora.py` — argv generation when `max_loras > 0`
+- `test_vllm_backend_lora.py` - argv generation when `max_loras > 0`
   (`--enable-lora`, `--max-loras N`, `--lora-modules name=path` for
   start-time-loaded adapters)
-- `test_sglang_backend_lora.py` — same for SGLang
-- `test_trtllm_backend_lora.py` — confirms `supports_adapters=False`
+- `test_sglang_backend_lora.py` - same for SGLang
+- `test_trtllm_backend_lora.py` - confirms `supports_adapters=False`
   and that registering an adapter against a TRT-LLM deployment errors
   cleanly
 
 Integration tests:
 - Mock vLLM container with a fake `/v1/load_lora_adapter` endpoint;
   verify the lifecycle drives it correctly
-- End-to-end via `serve adapter pull` → `serve run` → curl
-  `/v1/chat/completions` with `model=adapter_name` — uses `monkeypatch`
+- End-to-end via `serve adapter pull` -> `serve run` -> curl
+  `/v1/chat/completions` with `model=adapter_name` - uses `monkeypatch`
   on the engine HTTP layer; doesn't need a real GPU
 
 Live verification (operator-driven, not in CI):
@@ -306,24 +306,24 @@ Calling them out now so they get user input before they harden.
   accidentally register an adapter named identically to a base model.
   Routing has an ambiguity (#3 in `resolve_target` would never trigger
   for that name). **Proposal: enforce a disjoint-namespace check at
-  registration time — adapter name must not collide with any
+  registration time - adapter name must not collide with any
   `models.name`, and vice versa.**
 - **The `/admin/adapters/{name}/download` retry/cancellation story.**
   Adapters are smaller than bases (10-200 MB) so this matters less,
   but the same operator-cancellation concerns apply. **Proposal: same
-  as v1 `serve pull` — synchronous endpoint, client cancels by closing
+  as v1 `serve pull` - synchronous endpoint, client cancels by closing
   connection; partial downloads are HF's snapshot-resume story.**
 - **Whether to expose `max_loras` on `serve run`.** Current proposal:
   yes, as `--max-loras N`. Alternative: implicit (auto-enable LoRA on
   any deployment of a base that has registered adapters). Implicit is
-  more magical but less predictable. **Sticking with explicit.**
+  more automatic but less predictable. **Sticking with explicit.**
 
 ## 12. What's intentionally NOT in scope
 
-- Adapter sync between peers (Sub-project D)
+- Adapter sync between peers (Workstream D)
 - Adapter discovery / search (operator brings the HF repo)
 - Adapter performance benchmarking (use the v1 bench harness with mixed
-  `model=` traffic — the harness already takes a list of model names)
+  `model=` traffic - the harness already takes a list of model names)
 - Adapter version/tag management (treat each `(repo, revision)` pair as
   a distinct adapter; operators name them however they want)
-- UI for adapters (lands in v2 UI deepening work, not this sub-project)
+- UI for adapters (lands in v2 UI deepening work, not this workstream)

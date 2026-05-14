@@ -90,7 +90,7 @@ def test_build_argv_no_lora_flags_when_max_loras_zero():
 
 
 def test_build_argv_emits_lora_flags_when_max_loras_set():
-    """max_loras=4 → --enable-lora --max-loras 4 in argv."""
+    """max_loras=4 -> --enable-lora --max-loras 4 in argv."""
     argv = VLLMBackend().build_argv(_plan(max_loras=4), local_model_path="/m")
     i = argv.index("--enable-lora")
     j = argv.index("--max-loras")

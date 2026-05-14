@@ -58,7 +58,7 @@ def build_apps(
     - tcp_app: public OpenAI-compatible API + admin routes. Owns the lifespan
       (reconcile on startup, stop_all on shutdown).
     - uds_app: full surface (admin + OpenAI) for the local CLI / future UI.
-      No separate lifespan — shares the single Reaper and manager with tcp_app.
+      No separate lifespan - shares the single Reaper and manager with tcp_app.
     """
     event_bus = EventBus()
     stream_tokens = StreamTokenStore()
@@ -79,9 +79,8 @@ def build_apps(
         manager=manager,
         list_ready=lambda: _dep_store.list_ready(conn),
     )
-    # Sub-project C: predictor pre-warms adapters every tick_interval_s
-    # using the rule-based scorer over usage_events. Reads
-    # ~/.serve/predictor.yaml each ctor — operators tune via that file.
+    # Predictor pre-warms likely-needed adapters on a fixed interval.
+    # Operators tune it with ~/.serve/predictor.yaml.
     from serve_engine import config as _cfg
     from serve_engine.lifecycle.predictor import PredictorConfig
     from serve_engine.lifecycle.usage_rollup_task import UsageRollupTask

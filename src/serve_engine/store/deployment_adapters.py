@@ -6,7 +6,7 @@ from serve_engine.store.adapters import Adapter, _row_to_adapter
 
 
 def attach(conn: sqlite3.Connection, dep_id: int, adapter_id: int) -> None:
-    """Mark `adapter_id` as loaded into `dep_id`. Idempotent — calling on
+    """Mark `adapter_id` as loaded into `dep_id`. Idempotent - calling on
     an already-attached pair touches `loaded_at` and `last_used_at`."""
     conn.execute(
         """
@@ -28,7 +28,7 @@ def detach(conn: sqlite3.Connection, dep_id: int, adapter_id: int) -> None:
 
 def detach_all(conn: sqlite3.Connection, dep_id: int) -> None:
     """Drop every adapter attachment for a deployment. Called when the
-    deployment is being torn down — CASCADE handles this automatically
+    deployment is being torn down - CASCADE handles this automatically
     on row delete, but the manager calls it explicitly during the
     `stopping` phase so events fire and any in-flight unload requests
     don't race the row deletion."""

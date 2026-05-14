@@ -53,7 +53,7 @@ export default function Models() {
             disabled={!repo.trim() || addModel.isPending}
             onClick={() => addModel.mutate()}
           >
-            {addModel.isPending ? 'registering…' : 'register →'}
+            {addModel.isPending ? 'registering...' : 'register'}
           </button>
         </div>
         {addModel.error && (
@@ -90,7 +90,7 @@ export default function Models() {
                     className="text-accent hover:opacity-70 transition-opacity"
                     onClick={() => loadDefault.mutate(m)}
                   >
-                    load →
+                    load
                   </button>
                   <button
                     className="btn-link-danger"

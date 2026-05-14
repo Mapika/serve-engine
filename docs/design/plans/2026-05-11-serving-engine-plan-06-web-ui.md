@@ -1,4 +1,4 @@
-# Serving Engine — Plan 06: Web UI
+# Serving Engine - Plan 06: Web UI
 
 **Goal:** A small, tasteful web UI served by the daemon at `http://localhost:<port>/`. Five screens: Dashboard, Models, Playground, API Keys, Logs. Consumes the admin endpoints + SSE event stream + `/v1/chat/completions`.
 
@@ -20,34 +20,34 @@
 
 ```
 serving-engine/
-├── ui/                                # Frontend source (NOT shipped in wheel — only dist/ is)
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── vite.config.ts
-│   ├── tailwind.config.js
-│   ├── postcss.config.js
-│   ├── index.html
-│   └── src/
-│       ├── main.tsx
-│       ├── App.tsx
-│       ├── api.ts                     # fetch wrappers with Authorization
-│       ├── components/
-│       │   ├── TokenGate.tsx
-│       │   ├── Layout.tsx
-│       │   └── Sparkline.tsx
-│       └── views/
-│           ├── Dashboard.tsx
-│           ├── Models.tsx
-│           ├── Playground.tsx
-│           ├── Keys.tsx
-│           └── Logs.tsx
-├── src/serve_engine/ui/               # Bundled dist (committed)
-│   ├── __init__.py
-│   ├── index.html                     # COPIED from ui/dist on each build
-│   ├── assets/                        # COPIED from ui/dist/assets
-│   └── ...
-└── src/serve_engine/daemon/
-    └── ui_router.py                   # NEW — serves the static files
+|-- ui/                                # Frontend source (NOT shipped in wheel - only dist/ is)
+|   |-- package.json
+|   |-- tsconfig.json
+|   |-- vite.config.ts
+|   |-- tailwind.config.js
+|   |-- postcss.config.js
+|   |-- index.html
+|   +-- src/
+|       |-- main.tsx
+|       |-- App.tsx
+|       |-- api.ts                     # fetch wrappers with Authorization
+|       |-- components/
+|       |   |-- TokenGate.tsx
+|       |   |-- Layout.tsx
+|       |   +-- Sparkline.tsx
+|       +-- views/
+|           |-- Dashboard.tsx
+|           |-- Models.tsx
+|           |-- Playground.tsx
+|           |-- Keys.tsx
+|           +-- Logs.tsx
+|-- src/serve_engine/ui/               # Bundled dist (committed)
+|   |-- __init__.py
+|   |-- index.html                     # COPIED from ui/dist on each build
+|   |-- assets/                        # COPIED from ui/dist/assets
+|   +-- ...
++-- src/serve_engine/daemon/
+    +-- ui_router.py                   # NEW - serves the static files
 ```
 
 ---
@@ -224,7 +224,7 @@ Then:
 ```bash
 cd ui && npm run build && cd ..
 git add ui/ src/serve_engine/ui/
-# .gitignore should NOT exclude src/serve_engine/ui — that's the dist we ship
+# .gitignore should NOT exclude src/serve_engine/ui - that's the dist we ship
 # but DO add ui/node_modules to .gitignore
 echo "ui/node_modules" >> .gitignore
 echo "ui/dist" >> .gitignore  # not used (we output to src/serve_engine/ui directly)
@@ -283,7 +283,7 @@ In `src/serve_engine/daemon/app.py`:
         uds_app.include_router(ui_router)
 ```
 
-Wait — the UI must be reachable from the browser, which talks over TCP, not UDS. Re-read the Plan 04 design: `/admin/*` is UDS-only because it's unauth'd. With Plan 04 auth on, we can safely mount the UI + admin on TCP behind Bearer auth.
+Wait - the UI must be reachable from the browser, which talks over TCP, not UDS. Re-read the Plan 04 design: `/admin/*` is UDS-only because it's unauth'd. With Plan 04 auth on, we can safely mount the UI + admin on TCP behind Bearer auth.
 
 REVISED step 2: Mount the UI router on the TCP app, AND make sure the admin endpoints behind it require auth. Plan 04 already requires Bearer on /v1/*; we need to also require it on /admin/* if anyone wires it to TCP. Since Plan 04 mounted /admin/* on UDS only, let's KEEP it on UDS only and ALSO mount the UI on TCP with no auth on the static files (the JS app prompts for token).
 
@@ -334,7 +334,7 @@ git commit -m "feat(daemon): serve bundled UI at GET /"
 
 ---
 
-## Task 3: Auth — admin endpoints on TCP with Bearer
+## Task 3: Auth - admin endpoints on TCP with Bearer
 
 **Files:** `src/serve_engine/daemon/app.py` (modify), `tests/integration/test_openai_proxy.py` (verify unbroken)
 
@@ -353,8 +353,8 @@ Currently `tcp_app` has only `openai_router`. Change to also include `admin_rout
 This means /admin/* is now reachable on TCP. Plan 04's `require_auth_dep` was applied only to /v1/* routes. We need to extend it to /admin/* on TCP, but NOT break the UDS-only access (which is bypassed because typically no keys are configured on a homelab daemon).
 
 Actually `require_auth_dep` already bypasses when no keys exist. So:
-- Without any keys → /admin/* works on both TCP and UDS (no auth)
-- With keys created → /admin/* requires Bearer on TCP. UDS users can use the admin key as Bearer too.
+- Without any keys -> /admin/* works on both TCP and UDS (no auth)
+- With keys created -> /admin/* requires Bearer on TCP. UDS users can use the admin key as Bearer too.
 
 Add `require_auth_dep` to the admin router. In `daemon/admin.py`, change the router declaration:
 ```python
@@ -365,7 +365,7 @@ router = APIRouter(prefix="/admin", dependencies=[Depends(require_auth_dep)])
 
 This applies the dep to every route on the router. Existing routes don't need per-route Depends.
 
-- [ ] **Step 2: Restrictive auth — require admin tier on /admin/***
+- [ ] **Step 2: Restrictive auth - require admin tier on /admin/***
 
 Add a stricter dep that requires not just any key, but an admin-tier key:
 ```python
@@ -388,7 +388,7 @@ router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin_key)])
 
 - [ ] **Step 3: Update existing admin tests to use a key or no-keys-bypass**
 
-The existing `tests/unit/test_admin_endpoints.py` `app` fixture creates an empty `api_keys` table → bypass mode → tests work unchanged.
+The existing `tests/unit/test_admin_endpoints.py` `app` fixture creates an empty `api_keys` table -> bypass mode -> tests work unchanged.
 
 The new `test_pin_unpin_deployment`, `test_create_list_revoke_key`, etc. also work in bypass mode.
 
@@ -594,13 +594,13 @@ git commit -m "feat(ui): TokenGate auth flow + sidebar layout + view stubs"
 
 ---
 
-## Task 5: Views — Dashboard, Models, Keys, Playground, Logs
+## Task 5: Views - Dashboard, Models, Keys, Playground, Logs
 
 **Files:** the five view files under `ui/src/views/`.
 
-The view contents are pragmatic — fetch with React Query, render tables/forms. Full code for each view is provided below.
+The view contents are pragmatic - fetch with React Query, render tables/forms. Full code for each view is provided below.
 
-### 5a — Dashboard
+### 5a - Dashboard
 
 `ui/src/views/Dashboard.tsx`:
 ```tsx
@@ -623,7 +623,7 @@ export default function Dashboard() {
             <div key={g.index} className="bg-white rounded shadow p-4">
               <div className="text-sm text-gray-500">GPU {g.index}</div>
               <div className="text-xl font-mono">{g.memory_used_mb}/{g.memory_total_mb} MB</div>
-              <div className="text-sm text-gray-500 mt-2">util {g.gpu_util_pct}% • {g.power_w} W</div>
+              <div className="text-sm text-gray-500 mt-2">util {g.gpu_util_pct}% * {g.power_w} W</div>
               <div className="mt-2 h-2 bg-gray-200 rounded overflow-hidden">
                 <div
                   className="h-full bg-blue-500"
@@ -655,7 +655,7 @@ export default function Dashboard() {
                   <td className="p-2 font-mono">{m?.name ?? '-'}</td>
                   <td className="p-2">{d.backend}</td>
                   <td className="p-2">{d.status}</td>
-                  <td className="p-2">{d.pinned ? '★' : '-'}</td>
+                  <td className="p-2">{d.pinned ? '*' : '-'}</td>
                   <td className="p-2 font-mono">{d.vram_reserved_mb}</td>
                   <td className="p-2 font-mono">{d.gpu_ids.join(',')}</td>
                 </tr>
@@ -669,7 +669,7 @@ export default function Dashboard() {
 }
 ```
 
-### 5b — Models
+### 5b - Models
 
 `ui/src/views/Models.tsx`:
 ```tsx
@@ -720,7 +720,7 @@ export default function Models() {
           disabled={!repo.trim() || addModel.isPending}
           onClick={() => addModel.mutate()}
         >
-          {addModel.isPending ? 'Registering…' : 'Register'}
+          {addModel.isPending ? 'Registering...' : 'Register'}
         </button>
       </div>
 
@@ -756,7 +756,7 @@ export default function Models() {
 }
 ```
 
-### 5c — Keys
+### 5c - Keys
 
 `ui/src/views/Keys.tsx`:
 ```tsx
@@ -810,7 +810,7 @@ export default function Keys() {
         </div>
         {lastSecret && (
           <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm">
-            <div className="font-semibold">Save this — it won't be shown again:</div>
+            <div className="font-semibold">Save this - it won't be shown again:</div>
             <code className="font-mono break-all">{lastSecret}</code>
           </div>
         )}
@@ -849,7 +849,7 @@ export default function Keys() {
 }
 ```
 
-### 5d — Playground
+### 5d - Playground
 
 `ui/src/views/Playground.tsx`:
 ```tsx
@@ -919,7 +919,7 @@ export default function Playground() {
           value={selected}
           onChange={e => setSelected(e.target.value)}
         >
-          <option value="">— choose model —</option>
+          <option value=""> -  choose model  - </option>
           {(models.data ?? []).map((m: any) => (
             <option key={m.name} value={m.name}>{m.name}</option>
           ))}
@@ -927,7 +927,7 @@ export default function Playground() {
       </div>
       <textarea
         className="w-full h-32 border rounded p-3 font-mono text-sm"
-        placeholder="Ask something…"
+        placeholder="Ask something..."
         value={prompt}
         onChange={e => setPrompt(e.target.value)}
       />
@@ -935,7 +935,7 @@ export default function Playground() {
         className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50"
         disabled={!selected || !prompt.trim() || pending}
         onClick={send}
-      >{pending ? 'Streaming…' : 'Send'}</button>
+      >{pending ? 'Streaming...' : 'Send'}</button>
       <pre className="bg-gray-100 p-4 rounded text-sm whitespace-pre-wrap font-mono min-h-[8rem]">
         {response || ' '}
       </pre>
@@ -944,7 +944,7 @@ export default function Playground() {
 }
 ```
 
-### 5e — Logs
+### 5e - Logs
 
 `ui/src/views/Logs.tsx`:
 ```tsx
@@ -959,7 +959,7 @@ export default function Logs() {
   useEffect(() => {
     const token = getToken()
     // EventSource does not support custom headers; pass the token via query param if the API supports it.
-    // For now, only viable if no auth required (homelab) — TODO: implement a /admin/events?token= path
+    // For now, only viable if no auth required (homelab) - TODO: implement a /admin/events?token= path
     // or a small server-side handshake.
     const url = `/admin/events${token ? '' : ''}`
     const es = new EventSource(url)
@@ -977,7 +977,7 @@ export default function Logs() {
     <div className="space-y-4">
       <h2 className="text-2xl font-bold">Logs (live events)</h2>
       <pre className="bg-black text-green-300 font-mono text-xs p-4 rounded overflow-y-auto h-96">
-        {events.length === 0 && <div className="text-gray-500">waiting for events…</div>}
+        {events.length === 0 && <div className="text-gray-500">waiting for events...</div>}
         {events.map((e, i) => (
           <div key={i}>
             <span className="text-gray-500">{e.ts.slice(11, 19)}</span>{' '}
@@ -996,7 +996,7 @@ export default function Logs() {
 ```bash
 cd ui && npm run build && cd ..
 git add ui/src/views/ src/serve_engine/ui/
-git commit -m "feat(ui): five screens — dashboard, models, playground, keys, logs"
+git commit -m "feat(ui): five screens - dashboard, models, playground, keys, logs"
 ```
 
 ---
@@ -1005,16 +1005,16 @@ git commit -m "feat(ui): five screens — dashboard, models, playground, keys, l
 
 Manual procedure:
 
-- [ ] **Step 1** — With daemon up, create an admin key:
+- [ ] **Step 1** - With daemon up, create an admin key:
 ```bash
 serve daemon start
 serve key create web --tier admin
 # Save the printed secret.
 ```
 
-- [ ] **Step 2** — Open `http://127.0.0.1:11500/` in a browser.
-- [ ] **Step 3** — Paste the admin secret into the TokenGate. Sidebar should appear.
-- [ ] **Step 4** — Click around all 5 views. Verify:
+- [ ] **Step 2** - Open `http://127.0.0.1:11500/` in a browser.
+- [ ] **Step 3** - Paste the admin secret into the TokenGate. Sidebar should appear.
+- [ ] **Step 4** - Click around all 5 views. Verify:
   - Dashboard shows GPU cards + deployment table.
   - Models lists registered models, can register a new repo, can delete.
   - Playground streams a chat response from a loaded model.
@@ -1023,7 +1023,7 @@ serve key create web --tier admin
 
 ## Verification (end of Plan 06)
 
-1. `pytest -v` — all tests pass.
+1. `pytest -v` - all tests pass.
 2. `ruff check src/ tests/` clean.
 3. Built `src/serve_engine/ui/index.html` and `src/serve_engine/ui/assets/` present in the repo (committed).
 4. Browser flow works end-to-end.
@@ -1031,6 +1031,6 @@ serve key create web --tier admin
 ## Self-review
 
 - **Auth via Bearer header.** Works for fetch() but EventSource doesn't support custom headers; Logs view has a known limitation (works fully only when no keys exist, i.e. homelab bypass). Future task: query-param token, or `?` token, or upgrade the EventSource shim to use fetch + ReadableStream.
-- **No build dependency for users** — `dist/` is committed. Devs run `npm install && npm run build`.
+- **No build dependency for users** - `dist/` is committed. Devs run `npm install && npm run build`.
 - **Five screens, minimal but functional.** No charts library, no router, no state management beyond React Query.
 - **Forward compat:** UI calls only documented JSON API; rev-locks to the daemon's contract.

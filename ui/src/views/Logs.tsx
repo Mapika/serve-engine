@@ -121,12 +121,12 @@ export default function Logs() {
           value={selected ?? ''}
           onChange={e => setSelected(e.target.value ? Number(e.target.value) : null)}
         >
-          <option value="">— select deployment —</option>
+          <option value="">select deployment</option>
           {visibleDeps.map((d: any) => {
             const m = (models.data ?? []).find((m: any) => m.id === d.model_id)
             return (
               <option key={d.id} value={d.id}>
-                #{d.id}  ·  {m?.name ?? d.model_id}  ·  {d.status}
+                #{d.id} / {m?.name ?? d.model_id} / {d.status}
               </option>
             )
           })}

@@ -7,7 +7,7 @@ import typer
 from serve_engine.cli import app
 from serve_engine.doctor.runner import run_all, summarise
 
-_GLYPH = {"ok": "✓", "warn": "!", "fail": "✗"}
+_LABEL = {"ok": "OK", "warn": "WARN", "fail": "FAIL"}
 _COLOR = {"ok": typer.colors.GREEN, "warn": typer.colors.YELLOW, "fail": typer.colors.RED}
 
 
@@ -21,11 +21,11 @@ def doctor(json_out: bool = typer.Option(False, "--json")):
         } for r in results], indent=2))
         raise typer.Exit(_exit_code(results))
     for r in results:
-        glyph = _GLYPH.get(r.status, "?")
+        label = _LABEL.get(r.status, "?")
         color = _COLOR.get(r.status, typer.colors.WHITE)
-        typer.secho(f"  {glyph}  {r.name:<20} {r.detail}", fg=color)
+        typer.secho(f"  {label:<4} {r.name:<20} {r.detail}", fg=color)
         if r.fix and r.status != "ok":
-            typer.echo(f"     → {r.fix}")
+            typer.echo(f"     -> {r.fix}")
     ok, warn, fail = summarise(results)
     typer.echo()
     typer.secho(

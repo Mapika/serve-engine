@@ -42,7 +42,7 @@ trtllm:
   # TensorRT-engine path requires a separate ahead-of-time build step).
   # Tag tracks https://github.com/NVIDIA/TensorRT-LLM/releases (active RC line).
   # NGC strips the `v` prefix from github release names (github "v1.3.0rc14"
-  # → NGC tag "1.3.0rc14"). Pull is anonymous; no NGC account required.
+  # -> NGC tag "1.3.0rc14"). Pull is anonymous; no NGC account required.
   # Bump via `serve update-engines` when the github release line moves.
   image: nvcr.io/nvidia/tensorrt-llm/release
   pinned_tag: "1.3.0rc14"

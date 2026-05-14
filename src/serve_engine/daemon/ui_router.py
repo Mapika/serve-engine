@@ -29,7 +29,7 @@ def install_ui(app: FastAPI) -> bool:
     @router.get("/", response_class=HTMLResponse)
     def index_html() -> HTMLResponse:
         # Re-read on every request so `npm run build` is picked up without
-        # restarting the daemon — index.html is sub-1KB so cost is trivial.
+        # restarting the daemon - index.html is sub-1KB so cost is trivial.
         return HTMLResponse(content=index.read_text())
 
     app.include_router(router)

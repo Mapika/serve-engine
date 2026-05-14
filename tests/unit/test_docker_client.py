@@ -91,7 +91,7 @@ def test_stop_preserves_container_when_remove_false(fake_docker):
 
 
 def test_container_pids_returns_all_host_pids(fake_docker):
-    """`docker top` row → list of int PIDs from the PID column."""
+    """`docker top` row -> list of int PIDs from the PID column."""
     container = MagicMock()
     container.top.return_value = {
         "Titles": ["UID", "PID", "PPID", "C", "STIME", "TTY", "TIME", "CMD"],

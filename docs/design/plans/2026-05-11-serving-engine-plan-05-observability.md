@@ -1,10 +1,10 @@
-# Serving Engine — Plan 05: Observability
+# Serving Engine - Plan 05: Observability
 
-**Goal:** Make the daemon legible. Three surfaces: `GET /metrics` (Prometheus-format, aggregated from engines + daemon), `GET /admin/events` (SSE event stream for lifecycle transitions), `GET /admin/gpus` (live per-GPU memory and utilization). One new CLI command: `serve top` — htop-style live view of deployments, GPUs, and request rate. No new third-party libraries; we generate Prometheus text by hand and use the existing `pynvml` for GPU stats.
+**Goal:** Make the daemon legible. Three surfaces: `GET /metrics` (Prometheus-format, aggregated from engines + daemon), `GET /admin/events` (SSE event stream for lifecycle transitions), `GET /admin/gpus` (live per-GPU memory and utilization). One new CLI command: `serve top` - htop-style live view of deployments, GPUs, and request rate. No new third-party libraries; we generate Prometheus text by hand and use the existing `pynvml` for GPU stats.
 
 **Architecture:** A small in-process event bus (`asyncio.Queue` fanout) collects lifecycle events emitted by `LifecycleManager`. The SSE endpoint subscribes per-request and forwards. `/metrics` proxies each engine's `/metrics` and concatenates them with daemon-level metrics (requests served, deployments by state, etc.). `serve top` uses the events stream + a poll on `/admin/gpus` and `/admin/deployments`.
 
-**Tech Stack:** Same as Plans 01–04. New: `rich` for the terminal UI in `serve top` (already pulled in transitively by `typer`/`structlog`, but added explicitly).
+**Tech Stack:** Same as Plans 01-04. New: `rich` for the terminal UI in `serve top` (already pulled in transitively by `typer`/`structlog`, but added explicitly).
 
 ---
 
@@ -12,26 +12,26 @@
 
 ```
 serving-engine/
-├── src/serve_engine/
-│   ├── observability/
-│   │   ├── __init__.py
-│   │   ├── events.py          # in-process pub/sub
-│   │   ├── metrics.py         # Prometheus text generation + engine aggregation
-│   │   └── gpu_stats.py       # pynvml-backed per-GPU snapshot
-│   ├── lifecycle/
-│   │   └── manager.py         # MODIFIED — emit events on transitions
-│   ├── daemon/
-│   │   ├── admin.py           # MODIFIED — /admin/gpus + /admin/events
-│   │   ├── app.py             # MODIFIED — instantiate event bus, expose /metrics
-│   │   └── metrics_router.py  # NEW — /metrics route
-│   └── cli/
-│       └── top_cmd.py         # NEW — serve top
-└── tests/
-    └── unit/
-        ├── test_events.py
-        ├── test_metrics.py
-        ├── test_gpu_stats.py
-        └── test_admin_events_endpoint.py
+|-- src/serve_engine/
+|   |-- observability/
+|   |   |-- __init__.py
+|   |   |-- events.py          # in-process pub/sub
+|   |   |-- metrics.py         # Prometheus text generation + engine aggregation
+|   |   +-- gpu_stats.py       # pynvml-backed per-GPU snapshot
+|   |-- lifecycle/
+|   |   +-- manager.py         # MODIFIED - emit events on transitions
+|   |-- daemon/
+|   |   |-- admin.py           # MODIFIED - /admin/gpus + /admin/events
+|   |   |-- app.py             # MODIFIED - instantiate event bus, expose /metrics
+|   |   +-- metrics_router.py  # NEW - /metrics route
+|   +-- cli/
+|       +-- top_cmd.py         # NEW - serve top
++-- tests/
+    +-- unit/
+        |-- test_events.py
+        |-- test_metrics.py
+        |-- test_gpu_stats.py
+        +-- test_admin_events_endpoint.py
 ```
 
 ---
@@ -414,7 +414,7 @@ Also initialize the counter in `_attach_state`:
     app.state.request_count = 0
 ```
 
-- [ ] **Step 5: Wire the counter — increment in proxy**
+- [ ] **Step 5: Wire the counter - increment in proxy**
 
 In `daemon/openai_proxy.py` `_proxy`, after `dep_store.touch_last_request(conn, active.id)`, add:
 ```python
@@ -484,7 +484,7 @@ Pass `event_bus=event_bus` to `LifecycleManager(...)`. Then in `_attach_state`, 
     app.state.event_bus = event_bus
 ```
 
-(Both `tcp_app` and `uds_app` get the same bus — but only `uds_app` will expose `/admin/events`.)
+(Both `tcp_app` and `uds_app` get the same bus - but only `uds_app` will expose `/admin/events`.)
 
 - [ ] **Step 3: SSE endpoint in `admin.py`**
 
@@ -773,14 +773,14 @@ python -c "from serve_engine.cli import top_cmd; print('ok')"
 pytest -v
 ruff check src/ tests/
 git add src/serve_engine/cli/top_cmd.py src/serve_engine/cli/__init__.py
-git commit -m "feat(cli): serve top — live htop-style dashboard"
+git commit -m "feat(cli): serve top - live htop-style dashboard"
 ```
 
 ---
 
 ## Task 7: Live verification
 
-**Files:** none new — manual procedure documented at the end of this plan.
+**Files:** none new - manual procedure documented at the end of this plan.
 
 - [ ] **Step 1: With the daemon running and a deployment ready, verify each surface**
 
@@ -797,7 +797,7 @@ curl -s http://127.0.0.1:11500/metrics | head -20
 # /admin/gpus (UDS only)
 curl -s --unix-socket ~/.serve/sock http://localhost/admin/gpus
 
-# /admin/events SSE — open in another terminal
+# /admin/events SSE - open in another terminal
 curl -N --unix-socket ~/.serve/sock http://localhost/admin/events
 # Then trigger an event: serve stop in a third terminal
 
@@ -818,14 +818,14 @@ If all four surfaces produce output, Plan 05 is verified.
 
 ## Verification (end of Plan 05)
 
-1. `pytest -v` — all tests pass.
-2. `ruff check src/ tests/` — clean.
+1. `pytest -v` - all tests pass.
+2. `ruff check src/ tests/` - clean.
 3. Live: `/metrics`, `/admin/gpus`, `/admin/events`, `serve top` all produce output.
 
 ## Self-review
 
 - **Spec coverage:** event bus (T1), GPU snapshot (T2), Prometheus aggregation (T3), event emission + SSE (T4), `/admin/gpus` (T5), `serve top` (T6).
-- **No autotune, no UI** — UI is Plan 06.
+- **No autotune, no UI** - UI is Plan 06.
 - **Backward compat:** EventBus param to LifecycleManager is optional; old tests that don't pass it still work.
 - **Placeholder scan:** none.
 - **Type consistency:** `Event`, `EventBus`, `GPUSnapshot` used identically.

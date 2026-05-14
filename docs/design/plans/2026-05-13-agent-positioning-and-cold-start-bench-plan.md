@@ -1,24 +1,24 @@
-# Agent positioning + cold-start benchmark — implementation plan
+# Agent positioning + cold-start benchmark - implementation plan
 
 **Goal:** Ship the open-source launch artifacts approved in `docs/design/specs/2026-05-13-agent-positioning-and-cold-start-bench.md`: a snapshot benchmark harness, three realistic agent recipes under `examples/`, a rewritten README anchored on the benchmark numbers, and a `LAUNCH.md` draft.
 
-**Architecture:** No new daemon subsystems. The benchmark talks to the running daemon via the existing admin HTTP API over UDS (same transport pattern as the CLI). The examples are pure OpenAI-SDK Python clients with shell setup scripts — they treat serve-engine as a black box. The README rewrite is editorial.
+**Architecture:** No new daemon subsystems. The benchmark talks to the running daemon via the existing admin HTTP API over UDS (same transport pattern as the CLI). The examples are pure OpenAI-SDK Python clients with shell setup scripts - they treat serve-engine as a black box. The README rewrite is editorial.
 
 **Tech Stack:** Python 3.11+, `httpx` (UDS transport), `openai` SDK, `faiss-cpu` (for recipe 02), `pytest` for the bench's pure-logic unit tests, the existing FastAPI daemon for integration.
 
 **Execution discipline:**
 - TDD applies strictly to the bench's pure-logic functions (aggregation, table output, GPU fingerprint parsing). For glue code that drives a real daemon, integration testing via an in-process fake admin server.
-- Recipes are proofs-by-demonstration — no automated tests. Each `client.py` ships with a checked-in `sample-output.txt` from a real run; the diff against expected output is the canary.
+- Recipes are proofs-by-demonstration - no automated tests. Each `client.py` ships with a checked-in `sample-output.txt` from a real run; the diff against expected output is the canary.
 - One git commit per task. Each commit leaves the repo in a green state (existing 363 tests still pass, ruff still clean).
 
 **Tracking:** Use `- [ ]` checkboxes to mark progress. Tasks 1-5 are sequential (benchmark must produce real numbers before recipes/README make sense). Tasks 6-9 (examples) can be parallelized after Task 5 lands. Tasks 10-11 (README, LAUNCH) come last.
 
 ---
 
-## Task 1: Benchmark skeleton — CLI, output shapes, GPU fingerprint
+## Task 1: Benchmark skeleton - CLI, output shapes, GPU fingerprint
 
 **Files:**
-- Create: `scripts/__init__.py` (empty — makes `scripts` an importable package so the unit tests can `from scripts.bench_snapshots import ...`)
+- Create: `scripts/__init__.py` (empty - makes `scripts` an importable package so the unit tests can `from scripts.bench_snapshots import ...`)
 - Create: `scripts/bench_snapshots.py`
 - Create: `tests/unit/test_bench_snapshots.py`
 
@@ -110,13 +110,13 @@ def test_to_markdown_produces_three_row_table():
     assert "Engine ready" in md
     assert "First TTFT" in md
     assert "Total wallclock" in md
-    assert "5.8" in md or "5.83" in md  # 47.2 / 8.1 ≈ 5.83
-    assert "36" in md  # 12.4 / 0.34 ≈ 36.5
+    assert "5.8" in md or "5.83" in md  # 47.2 / 8.1 ~ 5.83
+    assert "36" in md  # 12.4 / 0.34 ~ 36.5
 ```
 
 - [ ] **Step 1.1: Save the test file above to `tests/unit/test_bench_snapshots.py`.**
 
-### Step 1.2: Run the tests — expect them to fail
+### Step 1.2: Run the tests - expect them to fail
 
 Run: `pytest tests/unit/test_bench_snapshots.py -v`
 Expected: All tests fail with `ImportError: cannot import name 'RunResult' from 'scripts.bench_snapshots'` (or `ModuleNotFoundError`).
@@ -131,7 +131,7 @@ Expected: All tests fail with `ImportError: cannot import name 'RunResult' from 
 """Cold-start snapshot benchmark for serve-engine.
 
 Measures the wallclock cost of bringing a model from "not loaded" to
-"first inference token" — once with no snapshot (cold), once with a
+"first inference token" - once with no snapshot (cold), once with a
 snapshot present (warm). The cold run produces the snapshot the warm
 run consumes, so a single benchmark execution generates both.
 
@@ -212,7 +212,7 @@ def aggregate(runs: list[RunResult]) -> dict[str, Any]:
 def to_markdown(cold: dict[str, Any], warm: dict[str, Any]) -> str:
     """Produce the README-pasteable markdown table from two aggregates."""
     def speedup(c: float, w: float) -> str:
-        return f"{c / w:.1f}×" if w > 0 else "n/a"
+        return f"{c / w:.1f}x" if w > 0 else "n/a"
     rows = [
         ("Engine ready", cold["ready"]["median"], warm["ready"]["median"]),
         ("First TTFT", cold["ttft"]["median"], warm["ttft"]["median"]),
@@ -248,7 +248,7 @@ if __name__ == "__main__":
 
 - [ ] **Step 1.3: Save the file above to `scripts/bench_snapshots.py`.**
 
-### Step 1.4: Run the tests — expect green
+### Step 1.4: Run the tests - expect green
 
 Run: `pytest tests/unit/test_bench_snapshots.py -v`
 Expected: 5 passed.
@@ -261,7 +261,7 @@ Run: `python scripts/bench_snapshots.py --help`
 Expected: usage message including `--model`, `--runs`, `--output`, `--sock`, `--gpu-id`.
 
 Run: `python scripts/bench_snapshots.py --model test/m --runs 1`
-Expected: Two lines — `Would run 1 cold + 1 warm against test/m on GPU 0` and `GPU: {...}`. Exit 0.
+Expected: Two lines - `Would run 1 cold + 1 warm against test/m on GPU 0` and `GPU: {...}`. Exit 0.
 
 - [ ] **Step 1.5: Verify CLI smoke-runs.**
 
@@ -304,7 +304,7 @@ from fastapi import FastAPI
 async def fake_daemon(tmp_path):
     """Spin up a FastAPI app on a UDS socket that simulates the admin
     surface bench_snapshots needs: POST /admin/models, POST /admin/deployments
-    (returns id), GET /admin/deployments/{id} (status flips loading→ready
+    (returns id), GET /admin/deployments/{id} (status flips loading->ready
     after one poll), DELETE /admin/deployments/{id}, plus a fake chat
     completion endpoint that streams a single token."""
     import uvicorn
@@ -387,7 +387,7 @@ async def test_one_run_against_fake_daemon(tmp_path):
 
 - [ ] **Step 2.1: Add the test above.**
 
-### Step 2.2: Run the test — expect failure
+### Step 2.2: Run the test - expect failure
 
 Run: `pytest tests/unit/test_bench_snapshots.py::test_one_run_against_fake_daemon -v`
 Expected: ImportError for `AdminClient` and `one_run`.
@@ -405,7 +405,7 @@ import httpx
 
 class AdminClient:
     """Thin async client over the daemon UDS socket. UDS path bypasses
-    admin auth (the daemon trusts anything on the socket — same trust
+    admin auth (the daemon trusts anything on the socket - same trust
     model the CLI uses)."""
 
     def __init__(self, sock: Path):
@@ -421,7 +421,7 @@ class AdminClient:
 
     async def ensure_model(self, name: str, hf_repo: str) -> None:
         """Register the model. If it already exists, the daemon returns
-        4xx — that's fine, we swallow it."""
+        4xx - that's fine, we swallow it."""
         async with self._client() as c:
             r = await c.post("/admin/models", json={"name": name, "hf_repo": hf_repo})
             if r.status_code not in (200, 201, 409):
@@ -495,7 +495,7 @@ async def one_run(
     gpu_id: int,
     poll_interval_s: float = 1.0,
 ) -> RunResult:
-    """One full timed cycle: create deployment → wait ready → measure TTFT → delete."""
+    """One full timed cycle: create deployment -> wait ready -> measure TTFT -> delete."""
     try:
         await client.ensure_model(model_name, hf_repo)
         t0 = time.monotonic()
@@ -517,7 +517,7 @@ async def one_run(
 
 - [ ] **Step 2.3: Add the code above.**
 
-### Step 2.4: Run the test — expect green
+### Step 2.4: Run the test - expect green
 
 Run: `pytest tests/unit/test_bench_snapshots.py -v`
 Expected: 6 passed (5 prior + 1 new).
@@ -531,7 +531,7 @@ git add scripts/bench_snapshots.py tests/unit/test_bench_snapshots.py
 git commit -m "feat(bench): admin HTTP client + one-run orchestration
 
 AdminClient wraps the UDS transport (same pattern as cli/ipc.py).
-one_run() drives a single create→ready→TTFT→delete cycle and returns
+one_run() drives a single create->ready->TTFT->delete cycle and returns
 a RunResult dataclass. Tested against an in-process FastAPI fake.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
@@ -577,7 +577,7 @@ async def test_benchmark_runs_cold_then_warm(tmp_path, monkeypatch):
     assert len(result["cold"]) == 2
     assert len(result["warm"]) == 2
     # Cold phase started by deleting the dir; warm phase ran with it present.
-    # Hard to assert from outside without instrumentation — accept that the
+    # Hard to assert from outside without instrumentation - accept that the
     # call sequence ran without raising.
     assert all(r.ok for r in result["cold"])
     assert all(r.ok for r in result["warm"])
@@ -585,7 +585,7 @@ async def test_benchmark_runs_cold_then_warm(tmp_path, monkeypatch):
 
 - [ ] **Step 3.1: Add the test.**
 
-### Step 3.2: Run — expect failure
+### Step 3.2: Run - expect failure
 
 Run: `pytest tests/unit/test_bench_snapshots.py::test_benchmark_runs_cold_then_warm -v`
 Expected: ImportError on `benchmark`.
@@ -603,7 +603,7 @@ import shutil
 def _purge_snapshots(snapshots_dir: Path) -> None:
     """Delete all snapshot directories. Used before each cold run.
     We delete the whole dir contents rather than guessing snapshot_keys
-    because the key is content-addressable on the deployment config —
+    because the key is content-addressable on the deployment config  -
     simpler and equivalent for the bench's purposes."""
     if not snapshots_dir.is_dir():
         return
@@ -674,7 +674,7 @@ async def benchmark(
 
 - [ ] **Step 3.3: Add the code.**
 
-### Step 3.4: Run — expect green
+### Step 3.4: Run - expect green
 
 Run: `pytest tests/unit/test_bench_snapshots.py -v`
 Expected: 7 passed.
@@ -698,7 +698,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 4: Wire `main()` — JSON output, markdown table, exit codes
+## Task 4: Wire `main()` - JSON output, markdown table, exit codes
 
 **Files:**
 - Modify: `scripts/bench_snapshots.py` (replace stub `main` body)
@@ -711,7 +711,7 @@ Replace the existing `main()` in `scripts/bench_snapshots.py` with:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--model", default="Qwen/Qwen2.5-1.5B-Instruct",
-                   help="HF repo id; also used as the registered model name (with / → -).")
+                   help="HF repo id; also used as the registered model name (with / -> -).")
     p.add_argument("--runs", type=int, default=5)
     p.add_argument("--output", type=Path, default=Path("docs/bench/snapshot-cold-vs-warm.json"))
     p.add_argument("--sock", type=Path, default=Path.home() / ".serve" / "sock")
@@ -721,7 +721,7 @@ def main() -> int:
     args = p.parse_args()
 
     if not args.sock.exists():
-        print(f"error: daemon socket not found at {args.sock} — is the daemon running?",
+        print(f"error: daemon socket not found at {args.sock} - is the daemon running?",
               file=sys.stderr)
         return 2
 
@@ -768,7 +768,7 @@ def main() -> int:
     args.output.write_text(json.dumps(payload, indent=2))
     print(f"Wrote {args.output}")
 
-    # Non-zero exit if too many runs failed — caller can gate launch on this.
+    # Non-zero exit if too many runs failed - caller can gate launch on this.
     if cold_agg["n_failed"] > args.runs // 2 or warm_agg["n_failed"] > args.runs // 2:
         print("FAILED: majority of runs errored", file=sys.stderr)
         return 1
@@ -795,7 +795,7 @@ Expected: 7 passed, ruff clean.
 
 ```bash
 git add scripts/bench_snapshots.py
-git commit -m "feat(bench): main() — JSON output, markdown table, exit codes
+git commit -m "feat(bench): main() - JSON output, markdown table, exit codes
 
 Non-zero exit if a majority of runs fail so a CI / launch script can
 gate on the result. JSON payload includes hardware fingerprint + git
@@ -808,9 +808,9 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 5: Run the benchmark against a real engine — the gate
+## Task 5: Run the benchmark against a real engine - the gate
 
-**This is the critical-path checkpoint per the spec.** If the First-TTFT row doesn't show ≥5× speedup, **stop and reassess before any further work**. The spec authorizes that pause.
+**This is the critical-path checkpoint per the spec.** If the First-TTFT row doesn't show >=5x speedup, **stop and reassess before any further work**. The spec authorizes that pause.
 
 **Files:**
 - Create: `docs/bench/snapshot-cold-vs-warm.json`
@@ -860,11 +860,11 @@ ratio = cold_ttft / warm_ttft if warm_ttft > 0 else 0
 print(f'cold TTFT median = {cold_ttft:.2f}s')
 print(f'warm TTFT median = {warm_ttft:.2f}s')
 print(f'speedup = {ratio:.1f}x')
-print('GATE PASS' if ratio >= 5.0 else 'GATE FAIL — STOP AND REASSESS')
+print('GATE PASS' if ratio >= 5.0 else 'GATE FAIL - STOP AND REASSESS')
 "
 ```
 
-- [ ] **Step 5.3: Gate check.** If output ends `GATE PASS`, continue. If `GATE FAIL`, do not proceed — return to brainstorming and revise the spec's launch story.
+- [ ] **Step 5.3: Gate check.** If output ends `GATE PASS`, continue. If `GATE FAIL`, do not proceed - return to brainstorming and revise the spec's launch story.
 
 ### Step 5.4: Commit the JSON (only if gate passed)
 
@@ -882,7 +882,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 6: `examples/README.md` — recipe index
+## Task 6: `examples/README.md` - recipe index
 
 **Files:**
 - Create: `examples/README.md`
@@ -899,17 +899,17 @@ daemon. Each recipe is self-contained:
 
 ```
 NN-<name>/
-├── README.md          # what this recipe shows, expected output
-├── setup.sh           # pulls models, starts deployments
-├── client.py          # OpenAI Python SDK only — no serve-engine imports
-└── sample-output.txt  # checked-in output from a real run, for verification
+|-- README.md          # what this recipe shows, expected output
+|-- setup.sh           # pulls models, starts deployments
+|-- client.py          # OpenAI Python SDK only - no serve-engine imports
++-- sample-output.txt  # checked-in output from a real run, for verification
 ```
 
 | Recipe | Demonstrates | VRAM | Models |
 |---|---|---|---|
 | [01-router-reasoner](01-router-reasoner/) | Multi-model auto-swap with a cost-saving routing pattern | ~6 GB | Qwen2.5-0.5B + Qwen2.5-1.5B |
-| [02-rag-embed-chat](02-rag-embed-chat/) | Embeddings + chat from one daemon — RAG over serve-engine's own README | ~5 GB | bge-small-en-v1.5 + Qwen2.5-1.5B |
-| [03-lora-per-task](03-lora-per-task/) | LoRA hot-load — switch task adapters without restarting the engine | ~6 GB | Qwen2.5-1.5B + 2 public LoRAs |
+| [02-rag-embed-chat](02-rag-embed-chat/) | Embeddings + chat from one daemon - RAG over serve-engine's own README | ~5 GB | bge-small-en-v1.5 + Qwen2.5-1.5B |
+| [03-lora-per-task](03-lora-per-task/) | LoRA hot-load - switch task adapters without restarting the engine | ~6 GB | Qwen2.5-1.5B + 2 public LoRAs |
 
 ## Prerequisites
 
@@ -919,7 +919,7 @@ NN-<name>/
 
 ## Recommended reading order
 
-If you're new: start with **01** — it's the cleanest demonstration of the
+If you're new: start with **01** - it's the cleanest demonstration of the
 "many models, one endpoint" story. **02** shows heterogeneous model
 families. **03** is the differentiator most other tools can't do at all.
 ```
@@ -940,7 +940,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 7: Recipe 01 — router-reasoner
+## Task 7: Recipe 01 - router-reasoner
 
 **Files:**
 - Create: `examples/01-router-reasoner/README.md`
@@ -954,7 +954,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Recipe 01 — Router + reasoner
+# Recipe 01 - Router + reasoner
 #
 # Pulls a small router model (0.5B) and a medium reasoner (1.5B), then
 # pins both. They live in serve-engine as separate models; client.py
@@ -974,7 +974,7 @@ echo "Both models loaded. Run: python client.py"
 ### Step 7.2: Write `client.py`
 
 ```python
-"""Recipe 01 — Router + reasoner.
+"""Recipe 01 - Router + reasoner.
 
 Demonstrates multi-model serving on one daemon:
   - A small (0.5B) router model classifies each prompt as trivial or complex.
@@ -1008,7 +1008,7 @@ PROMPTS = [
     "What's the boiling point of water in Celsius?",
     "Explain how RSA encryption works.",
     "Who wrote Hamlet?",
-    "Discuss the implications of Gödel's incompleteness theorems.",
+    "Discuss the implications of Godel's incompleteness theorems.",
     "What's 5 times 7?",
     "Describe the architectural differences between transformers and RNNs.",
     "Is the Earth round or flat?",
@@ -1069,14 +1069,14 @@ def main() -> None:
         else:
             routed_simple += 1
             tokens_small += n_tok
-        print(f"[{label:7}] {prompt[:60]:<60} → {text[:80]}")
+        print(f"[{label:7}] {prompt[:60]:<60} -> {text[:80]}")
 
     wall = time.monotonic() - t0
     print()
     print(f"Routed {routed_simple} to {ROUTER_MODEL} ({tokens_small} tok), "
           f"{routed_complex} to {REASONER_MODEL} ({tokens_large} tok)")
     print(f"Wall: {wall:.1f}s")
-    # Estimate: 1.5B costs roughly 3× compute per token vs 0.5B; if we
+    # Estimate: 1.5B costs roughly 3x compute per token vs 0.5B; if we
     # had sent everything to the reasoner the cost would have been
     # (tokens_small + tokens_large) at the larger-model rate.
     baseline = (tokens_small + tokens_large) * 3
@@ -1094,7 +1094,7 @@ if __name__ == "__main__":
 ### Step 7.3: Write `README.md`
 
 ```markdown
-# 01 — Router + reasoner
+# 01 - Router + reasoner
 
 **What this shows:** Two models served from one daemon, with the client
 choosing per request. Small model handles trivial questions cheaply;
@@ -1128,7 +1128,7 @@ See `sample-output.txt` for a real recorded run.
 
 A typical agent workload is dominated by routine routing decisions
 that don't need a 70B model. With serve-engine you keep multiple
-models pinned on one GPU and pick per-request — no inference proxy,
+models pinned on one GPU and pick per-request - no inference proxy,
 no separate processes, one OpenAI endpoint.
 ```
 
@@ -1143,7 +1143,7 @@ python client.py | tee sample-output.txt
 cd ../..
 ```
 
-Expected: 20 lines of classification + answer, then a summary. Watch for any "model not found" errors — if so, the model name doesn't match `setup.sh`. Fix and re-run.
+Expected: 20 lines of classification + answer, then a summary. Watch for any "model not found" errors - if so, the model name doesn't match `setup.sh`. Fix and re-run.
 
 - [ ] **Step 7.4: Run the recipe; `sample-output.txt` produced.**
 
@@ -1151,7 +1151,7 @@ Expected: 20 lines of classification + answer, then a summary. Watch for any "mo
 
 ```bash
 git add examples/01-router-reasoner/
-git commit -m "feat(examples): recipe 01 — router-reasoner
+git commit -m "feat(examples): recipe 01 - router-reasoner
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```
@@ -1160,9 +1160,9 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 8: Recipe 02 — RAG embed + chat
+## Task 8: Recipe 02 - RAG embed + chat
 
-**Pre-task validation:** Confirm that `serve-engine`'s OpenAI proxy supports `/v1/embeddings` correctly for `BAAI/bge-small-en-v1.5`. The spec flagged this as an open implementation question. **If embeddings don't work, swap in a different recipe (e.g., "two chat models for verifier-pattern") — do not silently ship a broken example.**
+**Pre-task validation:** Confirm that `serve-engine`'s OpenAI proxy supports `/v1/embeddings` correctly for `BAAI/bge-small-en-v1.5`. The spec flagged this as an open implementation question. **If embeddings don't work, swap in a different recipe (e.g., "two chat models for verifier-pattern") - do not silently ship a broken example.**
 
 **Files:**
 - Create: `examples/02-rag-embed-chat/README.md`
@@ -1171,7 +1171,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 - Create: `examples/02-rag-embed-chat/client.py`
 - Create: `examples/02-rag-embed-chat/sample-output.txt` (after run)
 
-### Step 8.1: Pre-task — validate embeddings work
+### Step 8.1: Pre-task - validate embeddings work
 
 ```bash
 serve pull BAAI/bge-small-en-v1.5 --name bge-small
@@ -1227,7 +1227,7 @@ Each file is a few paragraphs lifted from the corresponding README section.
 ### Step 8.4: Write `client.py`
 
 ```python
-"""Recipe 02 — RAG with embeddings + chat from one daemon.
+"""Recipe 02 - RAG with embeddings + chat from one daemon.
 
 Embeds 8 short docs about serve-engine, builds an in-memory FAISS index,
 then answers questions by retrieving the top-3 chunks and feeding them
@@ -1306,7 +1306,7 @@ if __name__ == "__main__":
 ### Step 8.5: Write `README.md`
 
 ```markdown
-# 02 — RAG: embeddings + chat from one daemon
+# 02 - RAG: embeddings + chat from one daemon
 
 **What this shows:** Two model families (a tiny embedding model and a
 chat model) coexist on the same daemon. The client talks to two
@@ -1338,7 +1338,7 @@ See `sample-output.txt` for a real recorded run.
 
 Production agent stacks rarely use a single model. Embeddings are
 cheap and small; chat is the heavy lifter. serve-engine treats them
-uniformly — same daemon, same auth, same metrics endpoint.
+uniformly - same daemon, same auth, same metrics endpoint.
 ```
 
 - [ ] **Step 8.5: Create the file.**
@@ -1358,7 +1358,7 @@ cd ../..
 
 ```bash
 git add examples/02-rag-embed-chat/
-git commit -m "feat(examples): recipe 02 — RAG with embeddings + chat
+git commit -m "feat(examples): recipe 02 - RAG with embeddings + chat
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```
@@ -1367,13 +1367,13 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 9: Recipe 03 — LoRA per task
+## Task 9: Recipe 03 - LoRA per task
 
 **Pre-task decision:** Identify the base + LoRAs. Open question from the spec.
 
 **Recommended approach:**
-- Base: `Qwen/Qwen2.5-1.5B-Instruct` (smaller is fine — the point is the hot-load, not the base capability).
-- LoRAs: search HuggingFace for `qwen2.5 1.5b lora` — candidates exist (functional/structured-output adapters, persona adapters, math adapters). Pick 2 with **explicit qwen2.5-1.5B-instruct** in the model card and same target_modules.
+- Base: `Qwen/Qwen2.5-1.5B-Instruct` (smaller is fine - the point is the hot-load, not the base capability).
+- LoRAs: search HuggingFace for `qwen2.5 1.5b lora` - candidates exist (functional/structured-output adapters, persona adapters, math adapters). Pick 2 with **explicit qwen2.5-1.5B-instruct** in the model card and same target_modules.
 - **Fallback:** train two tiny LoRAs ourselves with `peft` (~30 min on a 4090). Host in `Mapika/serve-engine-demo-adapters` or similar.
 
 **Files:**
@@ -1392,8 +1392,8 @@ huggingface-cli download --repo-type adapter <REPO_A> --quiet
 huggingface-cli download --repo-type adapter <REPO_B> --quiet
 ```
 
-Or train two ourselves (placeholder — implementation chooses one path):
-- Train a "JSON-output" LoRA: SFT on a tiny synthetic dataset of `{question → JSON answer}` pairs.
+Or train two ourselves (placeholder - implementation chooses one path):
+- Train a "JSON-output" LoRA: SFT on a tiny synthetic dataset of `{question -> JSON answer}` pairs.
 - Train a "concise" LoRA: SFT on a dataset of one-sentence answers.
 
 Either way, end this step with two public LoRA repos that load against Qwen2.5-1.5B-Instruct.
@@ -1426,7 +1426,7 @@ echo "Base + 2 adapters registered. Run: python client.py"
 ### Step 9.3: Write `client.py`
 
 ```python
-"""Recipe 03 — LoRA per task.
+"""Recipe 03 - LoRA per task.
 
 Demonstrates LoRA hot-load: same base model, different adapter per
 request, sub-second swap. Client just sets `model=<adapter-name>`.
@@ -1475,7 +1475,7 @@ if __name__ == "__main__":
 ### Step 9.4: Write `README.md`
 
 ```markdown
-# 03 — LoRA per task
+# 03 - LoRA per task
 
 **What this shows:** One base model, multiple task LoRAs, switched
 per request via the OpenAI `model` field. The first request to a new
@@ -1500,9 +1500,9 @@ python client.py
 ## What to expect
 
 5 requests:
-- The first two target two different adapters — each shows a one-time hot-load cost in the timing column.
+- The first two target two different adapters - each shows a one-time hot-load cost in the timing column.
 - The third hits the bare base model.
-- The last two re-target the previously-loaded adapters — these are fast.
+- The last two re-target the previously-loaded adapters - these are fast.
 
 See `sample-output.txt`.
 
@@ -1532,7 +1532,7 @@ cd ../..
 
 ```bash
 git add examples/03-lora-per-task/
-git commit -m "feat(examples): recipe 03 — LoRA per task (hot-load)
+git commit -m "feat(examples): recipe 03 - LoRA per task (hot-load)
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```
@@ -1554,8 +1554,8 @@ Replace lines 1-7 of `README.md` (the title, tagline, and Status line) with:
 # serve-engine
 
 The GPU box for a small AI team. Your agents call 5 models from one
-OpenAI endpoint — a tiny router, a medium retriever, a big reasoner,
-plus the LoRAs your team trained yesterday — on one machine.
+OpenAI endpoint - a tiny router, a medium retriever, a big reasoner,
+plus the LoRAs your team trained yesterday - on one machine.
 serve-engine keeps the hot ones warm and swaps the rest.
 
 A single-node multi-user inference orchestrator over vLLM, SGLang,
@@ -1570,15 +1570,15 @@ predictor) all wired and verified on H100 and RTX PRO 6000 Blackwell.
 
 - [ ] **Step 10.1: Replace the opening section.**
 
-### Step 10.2: Reorder "What it does" — agent-relevant bullets first
+### Step 10.2: Reorder "What it does" - agent-relevant bullets first
 
 In the existing "What it does" section, reorder the bullets to this sequence:
 
 1. **One daemon, many models.** (existing)
-2. **LoRA hot-load.** (new bullet — describe sub-second adapter swap; reference recipe 03)
+2. **LoRA hot-load.** (new bullet - describe sub-second adapter swap; reference recipe 03)
 3. **OpenAI-compatible.** (existing)
 4. **Real rate limits.** (existing)
-5. **Engine pluggability.** (moved down — important but technical)
+5. **Engine pluggability.** (moved down - important but technical)
 6. **Crash-safe.** (existing)
 7. **Observable.** (existing)
 8. **Web UI.** (existing)
@@ -1609,7 +1609,7 @@ re-runnable with `scripts/bench_snapshots.py`.
 
 The cold run pays the torch.compile compile cost; subsequent runs reuse
 the cached kernels from `~/.serve/snapshots/<key>/`. **First boot of
-any new model is always cold** — the snapshot is built during that
+any new model is always cold** - the snapshot is built during that
 first run. Every subsequent boot of the same configuration is warm.
 
 The same mechanism applies to SGLang; benchmarking is identical.
@@ -1628,9 +1628,9 @@ After the "Tested performance" section, insert:
 
 Three self-contained recipes under [`examples/`](examples/):
 
-- [`01-router-reasoner/`](examples/01-router-reasoner/) — Cheap routing with a small model + a medium reasoner. Two models, one endpoint, real cost savings.
-- [`02-rag-embed-chat/`](examples/02-rag-embed-chat/) — RAG over serve-engine's own README. Embeddings + chat from one daemon.
-- [`03-lora-per-task/`](examples/03-lora-per-task/) — LoRA hot-load. Same base model, different adapter per request, sub-second swap.
+- [`01-router-reasoner/`](examples/01-router-reasoner/) - Cheap routing with a small model + a medium reasoner. Two models, one endpoint, real cost savings.
+- [`02-rag-embed-chat/`](examples/02-rag-embed-chat/) - RAG over serve-engine's own README. Embeddings + chat from one daemon.
+- [`03-lora-per-task/`](examples/03-lora-per-task/) - LoRA hot-load. Same base model, different adapter per request, sub-second swap.
 ```
 
 - [ ] **Step 10.4: Insert the Examples section.**
@@ -1638,7 +1638,7 @@ Three self-contained recipes under [`examples/`](examples/):
 ### Step 10.5: Verify the README renders + commit
 
 ```bash
-# Eyeball the README — open in editor or render preview
+# Eyeball the README - open in editor or render preview
 git diff README.md
 ```
 
@@ -1671,17 +1671,17 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ### Step 11.1: Write the launch doc
 
 ```markdown
-# Launch — serve-engine open-source
+# Launch - serve-engine open-source
 
-**Status:** Draft. Edit this in place — it's the source of truth for
+**Status:** Draft. Edit this in place - it's the source of truth for
 the launch copy, HN post, and any external write-ups.
 
 ## The 200-word version (HN top-of-comment / Twitter thread / Reddit)
 
 serve-engine is a single-node inference orchestrator for small AI teams
 running agent workloads. One daemon serves 5 models from one
-OpenAI-compatible endpoint — a tiny router, a medium retriever, a big
-reasoner, plus task LoRAs your team trained yesterday — on one machine.
+OpenAI-compatible endpoint - a tiny router, a medium retriever, a big
+reasoner, plus task LoRAs your team trained yesterday - on one machine.
 Hot models stay resident, cold ones swap on demand.
 
 Three things worth a closer look:
@@ -1692,7 +1692,7 @@ Three things worth a closer look:
 
 2. **Snapshot-warm restarts.** First boot of a new model pays the
    torch.compile cost. Every subsequent boot reuses the cached
-   kernels — `<INSERT_TTFT_NUMBER>` on Qwen2.5-1.5B vs.
+   kernels - `<INSERT_TTFT_NUMBER>` on Qwen2.5-1.5B vs.
    `<INSERT_COLD_NUMBER>` cold. Numbers and a re-runnable benchmark
    in the repo.
 
@@ -1707,7 +1707,7 @@ GPU fleet. <REPO_URL>
 [Write the long-form version here once the 200-word version is locked.
 Aim for: the problem (small AI team has a GPU and wants to serve
 multiple models without standing up Kubernetes), the existing options
-(vllm serve, LiteLLM, BentoML — what each is missing for this
+(vllm serve, LiteLLM, BentoML - what each is missing for this
 audience), the serve-engine answer with the three differentiators
 above, then honest limits (single-node only, no multi-node, no
 autotune, no built-in TLS).]
@@ -1716,16 +1716,16 @@ autotune, no built-in TLS).]
 
 - [ ] Push branch to `main` on github.com/<USER>/serve-engine
 - [ ] Tag a v0.1.0 release (update `pyproject.toml` version, `__version__`)
-- [ ] Post HN with title: "Show HN: serve-engine — multi-model inference orchestrator for one GPU box"
+- [ ] Post HN with title: "Show HN: serve-engine - multi-model inference orchestrator for one GPU box"
 - [ ] Top-of-comment: paste the 200-word version above
 - [ ] Reddit /r/LocalLLaMA: longer post with the cold-start table screenshot
-- [ ] Twitter/X thread: 5 tweets — problem, hot-load demo, cold-start numbers, repo link, ask for feedback
+- [ ] Twitter/X thread: 5 tweets - problem, hot-load demo, cold-start numbers, repo link, ask for feedback
 - [ ] Monitor for 4 hours; respond to comments
 
 ## Out of scope for launch day
 
 - Multi-node distributed serving
-- Autotune (model → optimal TP / dtype)
+- Autotune (model -> optimal TP / dtype)
 - Built-in TLS
 - Contributor-onboarding docs (the project is single-author for now;
   PRs welcome but no formal CONTRIBUTING.md yet)
@@ -1755,13 +1755,13 @@ pytest -q
 ruff check src/ tests/ scripts/
 ```
 
-Expected: all tests pass (364+ — original 363 + the new bench unit tests), ruff clean.
+Expected: all tests pass (364+ - original 363 + the new bench unit tests), ruff clean.
 
 - [ ] **Step F.1: Green.**
 
 ### Step F.2: All three recipes still run
 
-For each recipe, re-run `./setup.sh && python client.py` and confirm the output still matches `sample-output.txt` shape (not exact strings — token sampling varies — but program completes, expected sections present).
+For each recipe, re-run `./setup.sh && python client.py` and confirm the output still matches `sample-output.txt` shape (not exact strings - token sampling varies - but program completes, expected sections present).
 
 - [ ] **Step F.2: All three recipes runnable from scratch.**
 

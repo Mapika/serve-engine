@@ -108,7 +108,7 @@ def test_build_argv_emits_lora_flags_when_max_loras_set():
 
 
 def test_build_argv_does_not_emit_max_lora_rank_or_target_modules():
-    """We do NOT pick max_lora_rank / lora_target_modules ourselves —
+    """We do NOT pick max_lora_rank / lora_target_modules ourselves  -
     they're checkpoint-specific. Operators set via --extra if needed."""
     argv = SGLangBackend().build_argv(_plan(max_loras=4), local_model_path="/m")
     assert "--max-lora-rank" not in argv

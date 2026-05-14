@@ -50,7 +50,7 @@ export default function TokenGate({ children }: { children: React.ReactNode }) {
                   setLocalToken(input.trim())
                 }}
               >
-                Continue →
+                Continue
               </button>
             </div>
           </div>

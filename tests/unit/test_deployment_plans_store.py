@@ -51,7 +51,7 @@ def test_record_persists_plan_as_json(tmp_path):
     assert parsed["model_name"] == "qwen3-7b"
     assert parsed["extra_args"] == {"--max-lora-rank": "64"}
     assert parsed["max_loras"] == 4
-    # `reached_ready_at` stays NULL until the load succeeds — failed plans
+    # `reached_ready_at` stays NULL until the load succeeds - failed plans
     # must not show up as a viable base to replay.
     assert rows[0].reached_ready_at is None
     assert pid > 0
@@ -59,7 +59,7 @@ def test_record_persists_plan_as_json(tmp_path):
 
 def test_most_recent_ready_skips_unready_rows(tmp_path):
     """A failed load leaves the row in place but reached_ready_at NULL.
-    most_recent_ready_for_model must skip those — replaying a plan that
+    most_recent_ready_for_model must skip those - replaying a plan that
     never worked is worse than not pre-warming at all."""
     conn = _conn(tmp_path)
     base = model_store.add(conn, name="qwen3-7b", hf_repo="o/qwen3-7b")
@@ -115,7 +115,7 @@ def test_plan_json_round_trips_into_DeploymentPlan(tmp_path):
 
 def test_cascades_with_deployment_deletion(tmp_path):
     """When the FK'd deployment row is deleted, deployment_id goes NULL
-    but the plan row stays — historical plans must survive cleanup of
+    but the plan row stays - historical plans must survive cleanup of
     their original deployment so we can still replay them."""
     conn = _conn(tmp_path)
     base = model_store.add(conn, name="qwen3-7b", hf_repo="o/qwen3-7b")

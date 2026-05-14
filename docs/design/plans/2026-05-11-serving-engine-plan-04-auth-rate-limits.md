@@ -1,12 +1,12 @@
-# Serving Engine — Plan 04: API Keys + Multi-Window Rate Limits
+# Serving Engine - Plan 04: API Keys + Multi-Window Rate Limits
 
 **Goal:** Bearer-token auth with proper rate limits at minute / hour / day / week scales (RPM, RPH, RPD, RPW for requests and TPM, TPH, TPD, TPW for tokens), matching what OpenAI / Anthropic / other inference providers expose. Returns `429 Too Many Requests` with `Retry-After` when a limit is hit.
 
-**Architecture:** A `key_store` table for hashed keys, a `key_usage_events` table that records `(key_id, ts, requests, tokens_in, tokens_out)` per request. The rate limiter is a sliding-window log over `key_usage_events` — straightforward to implement, simple to reason about, and fast enough for tens of QPS on SQLite. A FastAPI dependency wraps every `/v1/*` route. Admin endpoints + CLI to manage keys and tier definitions. Tiers live in YAML so a homelab can run with one tier ("admin") while a company defines many.
+**Architecture:** A `key_store` table for hashed keys, a `key_usage_events` table that records `(key_id, ts, requests, tokens_in, tokens_out)` per request. The rate limiter is a sliding-window log over `key_usage_events` - straightforward to implement, simple to reason about, and fast enough for tens of QPS on SQLite. A FastAPI dependency wraps every `/v1/*` route. Admin endpoints + CLI to manage keys and tier definitions. Tiers live in YAML so a homelab can run with one tier ("admin") while a company defines many.
 
-**Tech Stack:** Same as Plans 01–03. New: nothing — sha256 hashing from stdlib, sqlite for usage log, fastapi dependency.
+**Tech Stack:** Same as Plans 01-03. New: nothing - sha256 hashing from stdlib, sqlite for usage log, fastapi dependency.
 
-**Backward compat:** If no keys are registered (`api_keys` table empty), auth is bypassed entirely. This preserves Plan 01–03 "trust your network" UX for homelab users until they explicitly opt in by creating their first key.
+**Backward compat:** If no keys are registered (`api_keys` table empty), auth is bypassed entirely. This preserves Plan 01-03 "trust your network" UX for homelab users until they explicitly opt in by creating their first key.
 
 ---
 
@@ -14,31 +14,31 @@
 
 ```
 serving-engine/
-├── src/serve_engine/
-│   ├── store/
-│   │   ├── migrations/003_api_keys.sql      # NEW
-│   │   ├── api_keys.py                      # NEW
-│   │   └── key_usage.py                     # NEW
-│   ├── auth/
-│   │   ├── __init__.py                      # NEW (empty)
-│   │   ├── tiers.yaml                       # NEW — packaged tier presets
-│   │   ├── tiers.py                         # NEW — load tier limits
-│   │   ├── limiter.py                       # NEW — sliding-window logic
-│   │   └── middleware.py                    # NEW — FastAPI dependency
-│   ├── daemon/
-│   │   ├── admin.py                         # MODIFIED — /admin/keys, /admin/usage
-│   │   ├── openai_proxy.py                  # MODIFIED — auth dep + token tracking
-│   │   └── app.py                           # MODIFIED — mount auth dep
-│   └── cli/
-│       ├── key_cmd.py                       # NEW — serve key {create|list|revoke|show}
-│       └── __init__.py                      # MODIFIED — register key_cmd
-└── tests/
-    └── unit/
-        ├── test_api_keys_store.py           # NEW
-        ├── test_key_usage_store.py          # NEW
-        ├── test_tiers.py                    # NEW
-        ├── test_limiter.py                  # NEW
-        └── test_auth_middleware.py          # NEW
+|-- src/serve_engine/
+|   |-- store/
+|   |   |-- migrations/003_api_keys.sql      # NEW
+|   |   |-- api_keys.py                      # NEW
+|   |   +-- key_usage.py                     # NEW
+|   |-- auth/
+|   |   |-- __init__.py                      # NEW (empty)
+|   |   |-- tiers.yaml                       # NEW - packaged tier presets
+|   |   |-- tiers.py                         # NEW - load tier limits
+|   |   |-- limiter.py                       # NEW - sliding-window logic
+|   |   +-- middleware.py                    # NEW - FastAPI dependency
+|   |-- daemon/
+|   |   |-- admin.py                         # MODIFIED - /admin/keys, /admin/usage
+|   |   |-- openai_proxy.py                  # MODIFIED - auth dep + token tracking
+|   |   +-- app.py                           # MODIFIED - mount auth dep
+|   +-- cli/
+|       |-- key_cmd.py                       # NEW - serve key {create|list|revoke|show}
+|       +-- __init__.py                      # MODIFIED - register key_cmd
++-- tests/
+    +-- unit/
+        |-- test_api_keys_store.py           # NEW
+        |-- test_key_usage_store.py          # NEW
+        |-- test_tiers.py                    # NEW
+        |-- test_limiter.py                  # NEW
+        +-- test_auth_middleware.py          # NEW
 ```
 
 ---
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     prefix TEXT NOT NULL,                         -- "sk-aBc..." first 8 chars, for listing
     key_hash TEXT NOT NULL UNIQUE,                -- sha256 of full secret
     tier TEXT NOT NULL DEFAULT 'standard',
-    -- Optional per-key overrides (NULL → use tier defaults)
+    -- Optional per-key overrides (NULL -> use tier defaults)
     rpm_override INTEGER,
     tpm_override INTEGER,
     rpd_override INTEGER,
@@ -91,10 +91,10 @@ CREATE INDEX IF NOT EXISTS idx_key_usage_events_ts ON key_usage_events(ts);
 
 ```bash
 git add src/serve_engine/store/migrations/003_api_keys.sql
-git commit -m "feat(store): schema 003 — api_keys + key_usage_events"
+git commit -m "feat(store): schema 003 - api_keys + key_usage_events"
 ```
 
-(No tests yet — Task 2 introduces the consumer.)
+(No tests yet - Task 2 introduces the consumer.)
 
 ---
 
@@ -172,7 +172,7 @@ def test_per_key_overrides(tmp_path):
     assert fetched.rpd_override is None
 ```
 
-Run `pytest tests/unit/test_api_keys_store.py -v` → FAIL (module missing).
+Run `pytest tests/unit/test_api_keys_store.py -v` -> FAIL (module missing).
 
 - [ ] **Step 2: Implement `src/serve_engine/store/api_keys.py`**
 
@@ -706,7 +706,7 @@ class Denied:
 Decision = Allowed | Denied
 
 
-# (limit_attr, kind, window_s, label)  kind ∈ {"req","tok"}
+# (limit_attr, kind, window_s, label)  kind in {"req","tok"}
 _WINDOWS = [
     ("rpm", "req", 60, "rpm"),
     ("tpm", "tok", 60, "tpm"),
@@ -763,7 +763,7 @@ def _retry_after(window_s: int) -> int:
 pytest tests/unit/test_limiter.py -v
 ruff check src/ tests/
 git add src/serve_engine/auth/limiter.py tests/unit/test_limiter.py
-git commit -m "feat(auth): sliding-window rate limiter (8 windows: RPM/TPM × M/H/D/W)"
+git commit -m "feat(auth): sliding-window rate limiter (8 windows: RPM/TPM x M/H/D/W)"
 ```
 
 ---
@@ -914,7 +914,7 @@ def require_auth_dep(request: Request) -> api_keys.ApiKey | None:
 pytest tests/unit/test_auth_middleware.py -v
 ruff check src/ tests/
 git add src/serve_engine/auth/middleware.py tests/unit/test_auth_middleware.py
-git commit -m "feat(auth): FastAPI auth dependency — Bearer + tier rate limits + 429 Retry-After"
+git commit -m "feat(auth): FastAPI auth dependency - Bearer + tier rate limits + 429 Retry-After"
 ```
 
 ---
@@ -967,7 +967,7 @@ async def chat_completions(
 
 Apply the same shape to `/v1/completions`, `/v1/embeddings`.
 
-(For `GET /v1/models`, also wrap with the dep but it's a read-only listing — fine to require auth too.)
+(For `GET /v1/models`, also wrap with the dep but it's a read-only listing - fine to require auth too.)
 
 In `_proxy`, accept the key and record usage after the upstream stream completes. Update the body to:
 
@@ -1053,7 +1053,7 @@ def _extract_usage(body: bytes) -> tuple[int, int]:
         pass
     # SSE: vLLM emits a final `data: { ... "usage": {...} ...}` chunk for streams
     # that opt in via stream_options.include_usage=true. If absent, return (0, 0)
-    # — we don't introspect every chunk for tokens to avoid hot-path cost.
+    # - we don't introspect every chunk for tokens to avoid hot-path cost.
     for line in reversed(text.splitlines()):
         if line.startswith("data:") and "usage" in line:
             payload = line[len("data:"):].strip()
@@ -1070,7 +1070,7 @@ def _extract_usage(body: bytes) -> tuple[int, int]:
 
 - [ ] **Step 3: Update existing integration tests for tier_cfg**
 
-In `tests/integration/test_openai_proxy.py`, the existing `app_with_active_deployment` fixture must set `tier_cfg`. The `build_app` call already sets `app.state.tier_cfg` via Task 7 Step 1, so existing tests pass as-is (no keys → bypass).
+In `tests/integration/test_openai_proxy.py`, the existing `app_with_active_deployment` fixture must set `tier_cfg`. The `build_app` call already sets `app.state.tier_cfg` via Task 7 Step 1, so existing tests pass as-is (no keys -> bypass).
 
 - [ ] **Step 4: Run + commit**
 
@@ -1186,12 +1186,12 @@ def create(
     typer.echo(f"name:   {result['name']}")
     typer.echo(f"tier:   {result['tier']}")
     typer.echo(f"secret: {result['secret']}")
-    typer.echo("(save this secret now — it won't be shown again)")
+    typer.echo("(save this secret now - it won't be shown again)")
 
 
 @key_app.command("list")
 def list_keys(json_out: bool = typer.Option(False, "--json")):
-    """List API keys (prefixes only — secrets are never shown)."""
+    """List API keys (prefixes only - secrets are never shown)."""
     keys = asyncio.run(ipc.get(config.SOCK_PATH, "/admin/keys"))
     if json_out:
         typer.echo(json.dumps(keys, indent=2))
@@ -1298,7 +1298,7 @@ serve daemon start
 serve pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
 serve run qwen-0_5b --gpu 0 --ctx 4096
 
-# Phase 1: no keys yet → auth bypassed
+# Phase 1: no keys yet -> auth bypassed
 echo "=== phase 1: no keys, expect 200 ==="
 curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
   -X POST http://127.0.0.1:11500/v1/chat/completions \
@@ -1311,14 +1311,14 @@ secret=$(serve key create alice --tier trial | awk '/^secret:/ {print $2}')
 test -n "$secret" || { echo "no secret returned"; exit 1; }
 echo "Got secret: ${secret:0:12}..."
 
-# Phase 3: hit without bearer → expect 401
+# Phase 3: hit without bearer -> expect 401
 echo "=== phase 3: no bearer, expect 401 ==="
 curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
   -X POST http://127.0.0.1:11500/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"qwen-0_5b","messages":[{"role":"user","content":"hi"}],"max_tokens":4}'
 
-# Phase 4: hit with good bearer → expect 200
+# Phase 4: hit with good bearer -> expect 200
 echo "=== phase 4: good bearer, expect 200 ==="
 curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
   -X POST http://127.0.0.1:11500/v1/chat/completions \
@@ -1326,7 +1326,7 @@ curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
   -H 'Content-Type: application/json' \
   -d '{"model":"qwen-0_5b","messages":[{"role":"user","content":"hi"}],"max_tokens":4}'
 
-# Phase 5: fire 15 requests rapidly → trial tier RPM=10, expect ≥ 1 429
+# Phase 5: fire 15 requests rapidly -> trial tier RPM=10, expect >= 1 429
 echo "=== phase 5: 15 rapid requests, expect at least one 429 ==="
 hits_429=0
 for i in $(seq 1 15); do
@@ -1335,7 +1335,7 @@ for i in $(seq 1 15); do
       -H "Authorization: Bearer $secret" \
       -H 'Content-Type: application/json' \
       -d '{"model":"qwen-0_5b","messages":[{"role":"user","content":"hi"}],"max_tokens":1}')
-    echo "  req $i → $code"
+    echo "  req $i -> $code"
     if [ "$code" = "429" ]; then hits_429=$((hits_429+1)); fi
 done
 test $hits_429 -ge 1 || { echo "FAIL: expected at least one 429"; exit 1; }
@@ -1355,14 +1355,14 @@ git commit -m "test: Plan 04 smoke (auth + rate-limit 429)"
 
 ## Verification (end of Plan 04)
 
-1. `pytest -v` — all tests pass.
+1. `pytest -v` - all tests pass.
 2. `ruff check src/ tests/` clean.
 3. `bash scripts/smoke_p04_auth.sh` exits 0 with `PASS (N / 15 throttled)`.
 
 ## Self-review
 
 - **Spec coverage:** API keys hashed + storable (T2), tier presets in YAML (T4), 8-window sliding limiter (T5), Bearer auth + 401 + 429+Retry-After (T6), key usage tracked from upstream responses (T7), admin CRUD + CLI (T8), end-to-end smoke (T9).
-- **Backward compat:** Empty `api_keys` table → auth bypassed. Homelab users don't see a behavior change until they `serve key create` for the first time.
+- **Backward compat:** Empty `api_keys` table -> auth bypassed. Homelab users don't see a behavior change until they `serve key create` for the first time.
 - **No placeholders.**
 - **Type consistency:** `ApiKey`, `Limits`, `Overrides`, `Allowed`/`Denied` used identically across tasks. `tier_cfg: dict[str, Limits]` passed via `app.state` everywhere.
 - **What's deferred for later:** distributed rate limiting (multi-daemon), token-bucket optimization, OAuth/OIDC integration, fine-grained per-model permissions, audit log surface beyond stdout.

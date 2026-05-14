@@ -97,7 +97,7 @@ def verify(conn: sqlite3.Connection, secret: str) -> ApiKey | None:
 
     Security note: there is no post-DB hmac.compare_digest because the SELECT
     already filtered on `key_hash=?` (byte-exact). What we'd be comparing is
-    two SHA-256 hex digests known to be equal — not the user-provided secret.
+    two SHA-256 hex digests known to be equal - not the user-provided secret.
     Constant-time concerns apply to the *secret* string only; here the secret
     has already been hashed to a fixed-length digest before any comparison.
     If the SELECT predicate is ever loosened (LIKE, prefix match, etc.) this

@@ -1,4 +1,4 @@
-# Model-pattern → preferred backend. First match wins.
+# Model-pattern -> preferred backend. First match wins.
 # Patterns are case-insensitive fnmatch globs against the registered model
 # name (or HF repo for unregistered loads). Override per-request with `--engine`.
 #

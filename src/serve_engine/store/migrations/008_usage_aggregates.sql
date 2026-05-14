@@ -1,4 +1,4 @@
--- Sub-project C: bounded-storage rollup of usage_events.
+-- Bounded-storage rollup of usage_events.
 --
 -- After retention_days, the rollup job aggregates raw events into this
 -- table by (base_name, adapter_name, hour_of_week) and deletes the raw

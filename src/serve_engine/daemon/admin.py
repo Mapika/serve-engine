@@ -98,7 +98,7 @@ class CreateDeploymentRequest(BaseModel):
     model_name: str
     hf_repo: str
     revision: str = "main"
-    backend: str | None = None   # default → selection rules
+    backend: str | None = None   # default -> selection rules
     image_tag: str | None = None
     gpu_ids: list[int]
     tensor_parallel: int | None = None
@@ -232,7 +232,7 @@ async def create_deployment(
     tp = body.tensor_parallel or len(body.gpu_ids)
     # Mirror --max-lora-rank from extra_args into a first-class plan field
     # so we can pre-flight adapter rank against it. We don't strip it from
-    # extra_args — the backend still uses extra_args to emit the flag to
+    # extra_args - the backend still uses extra_args to emit the flag to
     # the engine container.
     max_lora_rank = _max_lora_rank_from_extra(body.extra_args)
     try:
@@ -516,7 +516,7 @@ def delete_model(name: str, conn: sqlite3.Connection = Depends(get_conn)):
     model_store.delete(conn, m.id)
 
 
-# -------- Adapters (Sub-project A) --------
+# -------- Adapters --------
 
 class CreateAdapterRequest(BaseModel):
     name: str
@@ -595,7 +595,7 @@ async def delete_adapter(
             f"hot-unload first or pass ?force=true",
         )
     # `force` cascade: hot-unload from each engine, drop junction rows, then
-    # delete the registry row. Adapter blob on disk is NOT auto-deleted —
+    # delete the registry row. Adapter blob on disk is NOT auto-deleted  -
     # operator can clean up via the HF cache directly.
     for dep_id in deps:
         dep = dep_store.get_by_id(conn, dep_id)
@@ -620,7 +620,7 @@ async def download_adapter_endpoint(
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     """Synchronously download an adapter's weights to the local cache.
-    Idempotent — returns the existing local_path if already downloaded."""
+    Idempotent - returns the existing local_path if already downloaded."""
     a = ad_store.get_by_name(conn, name)
     if a is None:
         raise HTTPException(404, f"adapter {name!r} not registered")
@@ -646,7 +646,7 @@ async def download_adapter_endpoint(
     ad_store.set_size_mb(conn, a.id, size_mb)
     # Parse adapter_config.json so we can pre-flight rank against the
     # deployment's --max-lora-rank at load time. Missing/malformed config
-    # is silently tolerated (parse returns None) — exotic formats still
+    # is silently tolerated (parse returns None) - exotic formats still
     # pull, they just lose the early rank check.
     meta = parse_adapter_metadata(local_path)
     if meta is not None and "lora_rank" in meta:
@@ -691,7 +691,7 @@ def add_local_adapter(
         )
 
     # Copy into the managed cache so the engine container's /cache bind-mount
-    # picks it up via the existing host→container path translation in
+    # picks it up via the existing host->container path translation in
     # hot_load_adapter.
     dest_root = manager._models_dir.resolve() / "local-adapters"
     dest = dest_root / body.name
@@ -858,7 +858,7 @@ async def hot_unload_adapter(
 async def _engine_unload_adapter(
     backend: Backend, dep, adapter_name: str,
 ) -> None:
-    """POST to the engine's unload path. Best-effort — if the engine
+    """POST to the engine's unload path. Best-effort - if the engine
     container is gone the unload still succeeds at the registry level
     (via the surrounding detach call)."""
     import httpx
@@ -874,7 +874,7 @@ async def _engine_unload_adapter(
             return  # engine gone; let detach proceed
     if r.status_code >= 500:
         # 4xx is fine (e.g., adapter wasn't loaded after all). 5xx means
-        # the engine is in a bad state — surface it.
+        # the engine is in a bad state - surface it.
         raise HTTPException(
             502, f"engine returned {r.status_code} on unload: {r.text[:200]}",
         )
@@ -973,7 +973,7 @@ def stream_current_logs(request: Request):
 async def stream_engine_logs_sse(dep_id: int, request: Request) -> StreamingResponse:
     """SSE: stdout/stderr of the engine container for this deployment.
 
-    Designed for the browser EventSource — each docker log chunk is reframed
+    Designed for the browser EventSource - each docker log chunk is reframed
     as one or more `data: <line>` SSE events. Includes the last 500 lines as
     history before following. The underlying sync iterator from docker-py is
     bridged into the event loop via asyncio.to_thread; on client disconnect

@@ -35,7 +35,7 @@ def add(
     revision: str = "main",
 ) -> Model:
     """Register a base model. Refuses if `name` collides with a registered
-    adapter — adapters and bases share the routing namespace, so a duplicate
+    adapter - adapters and bases share the routing namespace, so a duplicate
     would make `model='x'` ambiguous in OpenAI requests."""
     with conn.locked():
         # adapters table only exists at migration 004+; absence is fine.

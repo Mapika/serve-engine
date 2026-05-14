@@ -37,7 +37,7 @@ class EngineManifest:
     headroom: Headroom
     # Engine-version-specific flags appended to argv after the backend's own
     # flags but before plan.extra_args. Use this for workarounds tied to a
-    # pinned image tag — when the tag is bumped, revisit these.
+    # pinned image tag - when the tag is bumped, revisit these.
     extra_launch_args: tuple[str, ...] = ()
 
     @property

@@ -3,7 +3,7 @@
 One row per `manager.load(plan)` call, captured as JSON so we don't lose
 fields the `deployments` row doesn't store (extra_args,
 gpu_memory_utilization, enable_*). The predictor mines this to
-reconstruct a plan when it wants to pre-warm a base from scratch — the
+reconstruct a plan when it wants to pre-warm a base from scratch - the
 deployments table alone isn't sufficient because:
 
 - extra_args is operator-supplied (`-x '--max-lora-rank=N'`) and the
@@ -11,7 +11,7 @@ deployments table alone isn't sufficient because:
 - rows for stopped deployments stick around but rotate when the same
   model is re-launched, so a multi-month-old plan may have been deleted,
 - gpu_memory_utilization is computed at placement time and not part of
-  what the operator specified — replaying needs the *operator's* intent,
+  what the operator specified - replaying needs the *operator's* intent,
   not the manager's resolved values.
 
 Companion design: docs/design/specs/2026-05-13-predictive-layer-design.md
@@ -48,7 +48,7 @@ def record(
     conn: sqlite3.Connection,
     *,
     model_id: int,
-    plan,  # DeploymentPlan — typed loosely to avoid a circular import
+    plan,  # DeploymentPlan - typed loosely to avoid a circular import
     deployment_id: int | None = None,
 ) -> int:
     """Persist a plan submitted via `manager.load(plan)`. Returns the new
@@ -56,7 +56,7 @@ def record(
 
     `plan` is serialized via `dataclasses.asdict` so the predictor can
     rehydrate it with `DeploymentPlan(**json.loads(plan_json))` without
-    a custom codec — DeploymentPlan is a frozen dataclass of JSON-safe
+    a custom codec - DeploymentPlan is a frozen dataclass of JSON-safe
     primitives + a `dict[str, str]` extra_args.
     """
     plan_json = json.dumps(asdict(plan), sort_keys=True)
@@ -72,7 +72,7 @@ def record(
 
 def mark_ready(conn: sqlite3.Connection, plan_id: int) -> None:
     """Flip `reached_ready_at = CURRENT_TIMESTAMP`. Called by the manager
-    only after the engine's healthz answers — failed loads don't pollute
+    only after the engine's healthz answers - failed loads don't pollute
     the history with un-replayable plans."""
     conn.execute(
         "UPDATE deployment_plans SET reached_ready_at=CURRENT_TIMESTAMP "
@@ -86,7 +86,7 @@ def most_recent_ready_for_model(
 ) -> DeploymentPlanRecord | None:
     """The last plan that actually became healthy for this model. The
     predictor uses this to choose flags for a base pre-warm. Returns None
-    if the model has never had a successful load — pre-warming is unsafe
+    if the model has never had a successful load - pre-warming is unsafe
     in that case (we don't know what config works)."""
     row = conn.execute(
         """

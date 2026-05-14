@@ -240,6 +240,6 @@ def translate_trtllm_metrics(json_text: str, deployment_id: int) -> str:
 
     Convenience wrapper over `translate_many` for the single-deployment case.
     Returns the empty string for empty arrays, malformed JSON, or arrays
-    whose objects expose none of the recognised fields — never raises.
+    whose objects expose none of the recognised fields - never raises.
     """
     return translate_many([(deployment_id, json_text)])
