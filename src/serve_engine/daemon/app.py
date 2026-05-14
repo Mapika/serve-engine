@@ -72,12 +72,18 @@ def build_apps(
         configs_dir=configs_dir,
     )
 
+    from serve_engine.lifecycle.health_monitor import HealthMonitor
     from serve_engine.lifecycle.predictor_task import PredictorTask
     from serve_engine.lifecycle.reaper import Reaper
     from serve_engine.store import deployments as _dep_store
     reaper = Reaper(
         manager=manager,
         list_ready=lambda: _dep_store.list_ready(conn),
+    )
+    health_monitor = HealthMonitor(
+        conn=conn,
+        backends=backends,
+        manager=manager,
     )
     # Predictor pre-warms likely-needed adapters on a fixed interval.
     # Operators tune it with ~/.serve/predictor.yaml.
@@ -105,12 +111,14 @@ def build_apps(
         except Exception:
             log.exception("reconcile failed; continuing")
         reaper.start()
+        health_monitor.start()
         predictor_task.start()
         rollup_task.start()
         yield
         # Shutdown
         await rollup_task.stop()
         await predictor_task.stop()
+        await health_monitor.stop()
         await reaper.stop()
         try:
             await manager.stop_all()
