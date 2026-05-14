@@ -1,0 +1,428 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+import sqlite3
+from dataclasses import replace
+from pathlib import Path
+
+import httpx
+import yaml
+
+from serve_engine.backends.base import Backend
+from serve_engine.lifecycle.docker_client import DockerClient
+from serve_engine.lifecycle.downloader import download_model
+from serve_engine.lifecycle.kv_estimator import (
+    KVEstimateInput,
+    default_target_concurrency,
+    estimate_vram_mb,
+)
+from serve_engine.lifecycle.placement import (
+    AllocatedDeployment,
+    EvictThenFit,
+    NoRoom,
+    PlacementRequest,
+    plan_placement,
+)
+from serve_engine.lifecycle.plan import DeploymentPlan
+from serve_engine.lifecycle.topology import Topology
+from serve_engine.observability.events import Event, EventBus
+from serve_engine.store import deployment_adapters as da_store
+from serve_engine.store import deployment_plans as plan_store
+from serve_engine.store import deployments as dep_store
+from serve_engine.store import models as model_store
+
+log = logging.getLogger(__name__)
+
+
+async def download_model_async(**kwargs) -> str:
+    # snapshot_download is blocking; offload to a thread
+    return await asyncio.to_thread(download_model, **kwargs)
+
+
+async def wait_healthy(url: str, *, timeout_s: float = 600.0, interval_s: float = 2.0) -> bool:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        while loop.time() < deadline:
+            try:
+                r = await client.get(url)
+                if r.status_code == 200:
+                    return True
+            except httpx.HTTPError:
+                pass
+            await asyncio.sleep(interval_s)
+    return False
+
+
+class LifecycleManager:
+    def __init__(
+        self,
+        *,
+        conn: sqlite3.Connection,
+        docker_client: DockerClient,
+        backends: dict[str, Backend],
+        models_dir: Path,
+        topology: Topology | None = None,
+        load_timeout_s: float = 600.0,
+        event_bus: EventBus | None = None,
+        configs_dir: Path | None = None,
+    ):
+        self._conn = conn
+        self._docker = docker_client
+        self._backends = backends
+        self._models_dir = models_dir
+        # Per-deployment engine YAML configs, mounted into containers at
+        # /serve/configs:ro. Backends opt-in via engine_config(plan).
+        self._configs_dir = configs_dir or (models_dir.parent / "configs")
+        self._topology = topology
+        self._load_timeout_s = load_timeout_s
+        self._events = event_bus
+        self._lock = asyncio.Lock()
+        self._adapter_locks: dict[int, asyncio.Lock] = {}
+
+    def adapter_lock(self, dep_id: int) -> asyncio.Lock:
+        lock = self._adapter_locks.get(dep_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._adapter_locks[dep_id] = lock
+        return lock
+
+    async def _emit(self, kind: str, **payload) -> None:
+        if self._events is not None:
+            await self._events.publish(Event(kind=kind, payload=payload))
+
+    async def load(self, plan: DeploymentPlan):
+        async with self._lock:
+            # 1. Ensure model row
+            model = model_store.get_by_name(self._conn, plan.model_name)
+            if model is None:
+                model = model_store.add(
+                    self._conn,
+                    name=plan.model_name,
+                    hf_repo=plan.hf_repo,
+                    revision=plan.revision,
+                )
+
+            # 2. Ensure weights are local
+            local_path = model.local_path
+            if local_path is None:
+                local_path = await download_model_async(
+                    hf_repo=plan.hf_repo,
+                    revision=plan.revision,
+                    cache_dir=self._models_dir,
+                )
+                model_store.set_local_path(self._conn, model.id, local_path)
+
+            # 3. Resolve target_concurrency (None -> model-size-aware default)
+            #    and estimate VRAM.
+            if plan.target_concurrency is None:
+                target_concurrency = default_target_concurrency(
+                    Path(local_path),
+                    max_model_len=plan.max_model_len,
+                    dtype=plan.dtype,
+                )
+                log.info(
+                    "auto target_concurrency=%d for %s (ctx=%d, dtype=%s)",
+                    target_concurrency, plan.model_name, plan.max_model_len, plan.dtype,
+                )
+            else:
+                target_concurrency = plan.target_concurrency
+            vram_mb = estimate_vram_mb(KVEstimateInput(
+                model_dir=Path(local_path),
+                max_model_len=plan.max_model_len,
+                target_concurrency=target_concurrency,
+                dtype=plan.dtype,
+            ))
+
+            # 4. Replace any prior ready deployment of this same model name.
+            # CLI contract ("Stops the current model first"): `serve run X`
+            # supersedes the existing X. Pinned deployments are excluded
+            # from the replace - pin is the operator's commitment that the
+            # deployment is special; replacing requires an explicit
+            # `serve unpin` first. Doing the cutover after weight prep but
+            # before placement keeps the old container live during any HF
+            # download and frees its VRAM so placement can reuse the GPU.
+            priors = [
+                d for d in dep_store.list_ready(self._conn) if d.model_id == model.id
+            ]
+            for prior in priors:
+                if prior.pinned:
+                    raise RuntimeError(
+                        f"deployment #{prior.id} for {plan.model_name!r} is pinned; "
+                        f"run `serve unpin {plan.model_name}` before replacing it"
+                    )
+            for prior in priors:
+                await self._stop_locked(prior.id)
+
+            # 5. Placement
+            if self._topology is None:
+                raise RuntimeError(
+                    "topology not initialized; "
+                    "pass topology=read_topology() to LifecycleManager"
+                )
+            ready = dep_store.list_ready(self._conn)
+            # Map id -> LRU rank (lower rank = more evictable). Pinned are absent.
+            lru_rank = {
+                d.id: idx
+                for idx, d in enumerate(dep_store.list_evictable(self._conn))
+            }
+            allocated = sorted(
+                [
+                    AllocatedDeployment(
+                        id=d.id,
+                        gpu_ids=d.gpu_ids,
+                        vram_reserved_mb=d.vram_reserved_mb,
+                        pinned=d.pinned,
+                    )
+                    for d in ready
+                ],
+                # Pinned last (never evicted); within auto, LRU rank ascending
+                key=lambda a: (a.pinned, lru_rank.get(a.id, 0)),
+            )
+            request = PlacementRequest(
+                tensor_parallel=plan.tensor_parallel,
+                vram_reserved_mb=vram_mb,
+                model_name=plan.model_name,
+            )
+            decision = plan_placement(self._topology, allocated=allocated, request=request)
+
+            if isinstance(decision, NoRoom):
+                raise RuntimeError(decision.reason)
+            if isinstance(decision, EvictThenFit):
+                for victim_id in decision.evict_ids:
+                    await self._stop_locked(victim_id)
+                gpu_ids = decision.gpu_ids
+            else:  # Fit
+                gpu_ids = decision.gpu_ids
+
+            # 5. Create row + spawn container
+            dep = dep_store.create(
+                self._conn,
+                model_id=model.id,
+                backend=plan.backend,
+                image_tag=plan.image_tag,
+                gpu_ids=gpu_ids,
+                tensor_parallel=len(gpu_ids),
+                max_model_len=plan.max_model_len,
+                dtype=plan.dtype,
+                pinned=plan.pinned,
+                idle_timeout_s=plan.idle_timeout_s,
+                vram_reserved_mb=vram_mb,
+                max_loras=plan.max_loras,
+                max_lora_rank=plan.max_lora_rank,
+            )
+            # Base pre-warming history. Capture the operator's plan as JSON
+            # before the long health-check window so a daemon
+            # crash mid-load doesn't lose it. `reached_ready_at` stays NULL
+            # until the engine's healthz answers - failed loads must not
+            # tempt the predictor into replaying a bad config.
+            plan_record_id = plan_store.record(
+                self._conn, model_id=model.id, plan=plan, deployment_id=dep.id,
+            )
+            dep_store.update_status(self._conn, dep.id, "loading")
+            await self._emit(
+                "deployment.loading",
+                dep_id=dep.id,
+                model=plan.model_name,
+                backend=plan.backend,
+            )
+
+            backend = self._backends[plan.backend]
+            container_model_path = "/cache/" + str(
+                Path(local_path).resolve().relative_to(self._models_dir.resolve())
+            )
+            # Rebuild plan with the placement-chosen GPU set AND a per-deployment
+            # gpu_memory_utilization derived from our reservation. Without this
+            # override every vLLM container takes its requested fraction of the
+            # *whole* GPU, so two co-located deployments fight for memory and
+            # the later one OOMs. We compute fraction = (our share per GPU)
+            # / (per-GPU total), bounded by a minimum that gives vLLM room
+            # for weights + CUDA workspace + a usable KV cache. The KV estimator's
+            # output is the model's minimum need; vLLM itself wants headroom
+            # for paged-attention blocks, NCCL buffers, compiled kernels, etc.
+            tp = len(gpu_ids)
+            per_gpu_mb = self._topology.gpus[gpu_ids[0]].total_mb
+            mem_util = backend.headroom.effective_util(
+                reserved_mb=int(vram_mb / tp),
+                per_gpu_mb=per_gpu_mb,
+            )
+            effective_plan = replace(
+                plan,
+                gpu_ids=list(gpu_ids),
+                tensor_parallel=tp,
+                gpu_memory_utilization=mem_util,
+                target_concurrency=target_concurrency,
+            )
+            # 6. Per-deployment engine YAML (TRT-LLM uses --config to enable
+            # iter-perf stats and the CUDA-graph batch-size ladder). Backends
+            # that don't need a config return None from engine_config().
+            container_config_path: str | None = None
+            volumes = {str(self._models_dir.resolve()): {"bind": "/cache", "mode": "ro"}}
+            cfg = backend.engine_config(effective_plan)
+            if cfg is not None:
+                self._configs_dir.mkdir(parents=True, exist_ok=True)
+                host_cfg = self._configs_dir / f"{dep.id}.yml"
+                host_cfg.write_text(yaml.safe_dump(cfg, sort_keys=True))
+                container_config_path = f"/serve/configs/{dep.id}.yml"
+                volumes[str(self._configs_dir.resolve())] = {
+                    "bind": "/serve/configs", "mode": "ro",
+                }
+
+            argv = backend.build_argv(
+                effective_plan,
+                local_model_path=container_model_path,
+                config_path=container_config_path,
+            )
+
+            container_env = backend.container_env(effective_plan)
+
+            handle = self._docker.run(
+                image=plan.image_tag,
+                name=f"serve-{plan.backend}-{plan.model_name}-{dep.id}",
+                command=argv,
+                environment=container_env,
+                kwargs=backend.container_kwargs(effective_plan),
+                volumes=volumes,
+                internal_port=backend.internal_port,
+            )
+            dep_store.set_container(
+                self._conn, dep.id,
+                container_id=handle.id,
+                container_name=handle.name,
+                container_port=handle.port,
+                container_address=handle.address,
+            )
+            await self._emit("deployment.spawned", dep_id=dep.id, container_id=handle.id)
+
+            health_url = f"http://{handle.address}:{handle.port}{backend.health_path}"
+            ok = await wait_healthy(health_url, timeout_s=self._load_timeout_s)
+            if not ok:
+                # Leave the failed container around so its logs survive - without
+                # them, "engine did not become healthy" is unactionable. The
+                # operator can `docker logs <name>` to find the real error, then
+                # `serve stop <id>` (which removes the container) when done.
+                self._docker.stop(handle.id, timeout=10, remove=False)
+                msg = (
+                    f"engine did not become healthy within load timeout "
+                    f"({health_url}); container {handle.name} preserved for "
+                    f"inspection (`docker logs {handle.name}`)"
+                )
+                dep_store.update_status(self._conn, dep.id, "failed", last_error=msg)
+                await self._emit("deployment.failed", dep_id=dep.id, error=msg)
+                raise RuntimeError(msg)
+
+            dep_store.update_status(self._conn, dep.id, "ready")
+            plan_store.mark_ready(self._conn, plan_record_id)
+            await self._emit("deployment.ready", dep_id=dep.id)
+
+            return dep_store.get_by_id(self._conn, dep.id)
+
+    async def stop(self, dep_id: int) -> None:
+        async with self._lock:
+            await self._stop_locked(dep_id)
+
+    async def pin(self, dep_id: int, pinned: bool = True) -> None:
+        dep_store.set_pinned(self._conn, dep_id, pinned)
+        await self._emit("deployment.pinned" if pinned else "deployment.unpinned", dep_id=dep_id)
+
+    async def reconcile(self) -> None:
+        """At startup: walk ready deployments, verify their containers exist.
+
+        If the daemon crashed between marking 'ready' and (e.g.) the user
+        running `serve stop`, the DB row is stale. We can't reliably re-bind
+        to a running container (we'd need to repopulate routing tables and
+        recompute the host port). Simpler and safer: mark stale rows failed
+        and let the user re-load.
+        """
+        async with self._lock:
+            for d in dep_store.list_all(self._conn):
+                if d.status not in dep_store.ACTIVE_STATUSES and d.status != "stopping":
+                    continue
+                if d.container_id is None:
+                    dep_store.update_status(
+                        self._conn, d.id, "failed",
+                        last_error=f"daemon found stale {d.status!r} row without container",
+                    )
+                    continue
+                try:
+                    container = self._docker._client.containers.get(d.container_id)
+                    status = container.status
+                except Exception:
+                    log.warning(
+                        "reconcile: deployment %s container %s missing; marking failed",
+                        d.id, d.container_id,
+                    )
+                    dep_store.update_status(
+                        self._conn, d.id, "failed",
+                        last_error="container disappeared while daemon was down",
+                    )
+                    continue
+                if status != "running":
+                    log.warning(
+                        "reconcile: deployment %s container %s status=%s; cleaning",
+                        d.id, d.container_id, status,
+                    )
+                    try:
+                        container.remove(force=True)
+                    except Exception:
+                        pass
+                    dep_store.update_status(
+                        self._conn, d.id, "failed",
+                        last_error=f"container exited (status={status}) while daemon was down",
+                    )
+                    continue
+                if d.status == "stopping":
+                    self._docker.stop(d.container_id, timeout=30)
+                    dep_store.update_status(self._conn, d.id, "stopped")
+                    continue
+                if d.status == "loading":
+                    backend = self._backends.get(d.backend)
+                    if (
+                        backend is not None
+                        and d.container_address is not None
+                        and d.container_port is not None
+                    ):
+                        health_url = (
+                            f"http://{d.container_address}:{d.container_port}"
+                            f"{backend.health_path}"
+                        )
+                        if await wait_healthy(health_url, timeout_s=5.0, interval_s=1.0):
+                            dep_store.update_status(self._conn, d.id, "ready")
+                            await self._emit("deployment.ready", dep_id=d.id)
+                            log.info("reconcile: deployment %s became ready", d.id)
+                            continue
+                    self._docker.stop(d.container_id, timeout=30)
+                    dep_store.update_status(
+                        self._conn, d.id, "failed",
+                        last_error="daemon restarted while deployment was loading",
+                    )
+                    continue
+                log.info("reconcile: deployment %s re-adopted (%s running)",
+                         d.id, d.container_id)
+
+    async def stop_all(self) -> None:
+        """Stop every deployment that has not already reached stopped."""
+        async with self._lock:
+            for d in dep_store.list_all(self._conn):
+                if d.status == "stopped":
+                    continue
+                await self._stop_locked(d.id)
+
+    async def _stop_locked(self, dep_id: int) -> None:
+        dep = dep_store.get_by_id(self._conn, dep_id)
+        if dep is None:
+            return
+        dep_store.update_status(self._conn, dep.id, "stopping")
+        if dep.container_id:
+            self._docker.stop(dep.container_id, timeout=30)
+        da_store.detach_all(self._conn, dep.id)
+        # Remove the per-deployment engine config file if one was written.
+        cfg_path = self._configs_dir / f"{dep.id}.yml"
+        if cfg_path.exists():
+            try:
+                cfg_path.unlink()
+            except OSError:
+                pass
+        dep_store.update_status(self._conn, dep.id, "stopped")
+        await self._emit("deployment.stopped", dep_id=dep_id)
