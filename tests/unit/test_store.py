@@ -19,6 +19,7 @@ def test_init_schema_creates_tables(tmp_path):
     table_names = {r[0] for r in rows}
     assert "models" in table_names
     assert "deployments" in table_names
+    assert "service_profiles" in table_names
     assert "_migrations" in table_names
 
 

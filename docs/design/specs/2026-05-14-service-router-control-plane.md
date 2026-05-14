@@ -106,6 +106,19 @@ explicit without breaking the existing model/deployment commands.
   route base, GPU hints, and concurrency limits.
 - Expose profiles in the UI as the primary launch surface.
 
+Initial API surface:
+
+- `GET /admin/service-profiles`
+- `POST /admin/service-profiles`
+- `GET /admin/service-profiles/{name}`
+- `POST /admin/service-profiles/{name}/deploy`
+- `DELETE /admin/service-profiles/{name}`
+
+The first implementation stores model-serving launch definitions and
+deploys them through the existing `DeploymentPlan` path. That gives the
+router direction a concrete persistence/API layer without breaking the
+current model/deployment compatibility surface.
+
 ### Phase 2: Router Policy Layer
 
 - Introduce a route table separate from the model registry.

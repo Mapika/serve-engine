@@ -20,6 +20,7 @@ from serve_engine.store import api_keys as _ak_store
 from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
+from serve_engine.store import service_profiles as profile_store
 
 
 def _is_uds_request(request: Request) -> bool:
@@ -109,10 +110,75 @@ class CreateDeploymentRequest(BaseModel):
     extra_args: dict[str, str] = {}
 
 
+class CreateServiceProfileRequest(BaseModel):
+    model_config = {"protected_namespaces": ()}
+    name: str
+    model_name: str
+    hf_repo: str
+    revision: str = "main"
+    backend: str | None = None
+    image_tag: str | None = None
+    gpu_ids: list[int]
+    tensor_parallel: int | None = None
+    max_model_len: int = 8192
+    dtype: str = "auto"
+    pinned: bool = False
+    idle_timeout_s: int | None = None
+    target_concurrency: int | None = None
+    max_loras: int = 0
+    extra_args: dict[str, str] = {}
+
+
 class CreateModelRequest(BaseModel):
     name: str
     hf_repo: str
     revision: str = "main"
+
+
+def _max_lora_rank_from_extra(extra_args: dict[str, str]) -> int:
+    raw = extra_args.get("--max-lora-rank")
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except ValueError as e:
+        raise HTTPException(
+            400, f"--max-lora-rank must be an integer; got {raw!r}",
+        ) from e
+
+
+def _validate_backend_capabilities(
+    *,
+    plan: DeploymentPlan,
+    backend: Backend,
+    backend_name: str,
+) -> None:
+    if plan.max_loras > 0 and not backend.supports_adapters:
+        raise HTTPException(
+            400,
+            f"backend {backend_name!r} does not support LoRA adapters; "
+            f"`max_loras` must be 0 (got {plan.max_loras})",
+        )
+
+
+def _profile_to_plan(profile: profile_store.ServiceProfile) -> DeploymentPlan:
+    return DeploymentPlan(
+        model_name=profile.model_name,
+        hf_repo=profile.hf_repo,
+        revision=profile.revision,
+        backend=profile.backend,
+        image_tag=profile.image_tag,
+        gpu_ids=profile.gpu_ids,
+        tensor_parallel=profile.tensor_parallel,
+        max_model_len=profile.max_model_len,
+        dtype=profile.dtype,
+        pinned=profile.pinned,
+        idle_timeout_s=profile.idle_timeout_s,
+        target_concurrency=profile.target_concurrency,
+        max_loras=profile.max_loras,
+        max_lora_rank=profile.max_lora_rank,
+        extra_args=dict(profile.extra_args),
+    )
 
 
 @router.get("/deployments")
@@ -158,15 +224,7 @@ async def create_deployment(
     # so we can pre-flight adapter rank against it. We don't strip it from
     # extra_args — the backend still uses extra_args to emit the flag to
     # the engine container.
-    max_lora_rank = 0
-    raw = body.extra_args.get("--max-lora-rank")
-    if raw:
-        try:
-            max_lora_rank = int(raw)
-        except ValueError as e:
-            raise HTTPException(
-                400, f"--max-lora-rank must be an integer; got {raw!r}",
-            ) from e
+    max_lora_rank = _max_lora_rank_from_extra(body.extra_args)
     try:
         plan = DeploymentPlan(
             model_name=body.model_name,
@@ -188,12 +246,7 @@ async def create_deployment(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     # Backend-aware validation: max_loras > 0 requires an adapter-capable backend.
-    if plan.max_loras > 0 and not backend.supports_adapters:
-        raise HTTPException(
-            400,
-            f"backend {backend_name!r} does not support LoRA adapters; "
-            f"`max_loras` must be 0 (got {plan.max_loras})",
-        )
+    _validate_backend_capabilities(plan=plan, backend=backend, backend_name=backend_name)
     try:
         dep = await manager.load(plan)
     except RuntimeError as e:
@@ -203,6 +256,118 @@ async def create_deployment(
         # message instead of showing a bare 500.
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
     return {**asdict(dep), "gpu_ids": dep.gpu_ids}
+
+
+@router.get("/service-profiles")
+def list_service_profiles(conn: sqlite3.Connection = Depends(get_conn)):
+    return [asdict(p) for p in profile_store.list_all(conn)]
+
+
+@router.post("/service-profiles", status_code=status.HTTP_201_CREATED)
+def create_service_profile(
+    body: CreateServiceProfileRequest,
+    backends: dict[str, Backend] = Depends(get_backends),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    from serve_engine.backends.selection import load_selection, pick_backend
+    backend_name = body.backend or pick_backend(load_selection(), body.model_name)
+    if backend_name not in backends:
+        raise HTTPException(400, f"backend {backend_name!r} not supported")
+    backend = backends[backend_name]
+    image_tag = body.image_tag or backend.image_default
+    tp = body.tensor_parallel or len(body.gpu_ids)
+    max_lora_rank = _max_lora_rank_from_extra(body.extra_args)
+    try:
+        plan = DeploymentPlan(
+            model_name=body.model_name,
+            hf_repo=body.hf_repo,
+            revision=body.revision,
+            backend=backend_name,
+            image_tag=image_tag,
+            gpu_ids=body.gpu_ids,
+            tensor_parallel=tp,
+            max_model_len=body.max_model_len,
+            dtype=body.dtype,
+            pinned=body.pinned,
+            idle_timeout_s=body.idle_timeout_s,
+            target_concurrency=body.target_concurrency,
+            max_loras=body.max_loras,
+            max_lora_rank=max_lora_rank,
+            extra_args=dict(body.extra_args),
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    _validate_backend_capabilities(plan=plan, backend=backend, backend_name=backend_name)
+    try:
+        profile = profile_store.create(
+            conn,
+            name=body.name,
+            model_name=plan.model_name,
+            hf_repo=plan.hf_repo,
+            revision=plan.revision,
+            backend=plan.backend,
+            image_tag=plan.image_tag,
+            gpu_ids=plan.gpu_ids,
+            tensor_parallel=plan.tensor_parallel,
+            max_model_len=plan.max_model_len,
+            dtype=plan.dtype,
+            pinned=plan.pinned,
+            idle_timeout_s=plan.idle_timeout_s,
+            target_concurrency=plan.target_concurrency,
+            max_loras=plan.max_loras,
+            max_lora_rank=plan.max_lora_rank,
+            extra_args=plan.extra_args,
+        )
+    except profile_store.AlreadyExists as e:
+        raise HTTPException(409, str(e)) from e
+    return asdict(profile)
+
+
+@router.get("/service-profiles/{name}")
+def get_service_profile(
+    name: str,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    profile = profile_store.get_by_name(conn, name)
+    if profile is None:
+        raise HTTPException(404, f"service profile {name!r} not found")
+    return asdict(profile)
+
+
+@router.post("/service-profiles/{name}/deploy", status_code=status.HTTP_201_CREATED)
+async def deploy_service_profile(
+    name: str,
+    manager: LifecycleManager = Depends(get_manager),
+    backends: dict[str, Backend] = Depends(get_backends),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    profile = profile_store.get_by_name(conn, name)
+    if profile is None:
+        raise HTTPException(404, f"service profile {name!r} not found")
+    backend = backends.get(profile.backend)
+    if backend is None:
+        raise HTTPException(400, f"backend {profile.backend!r} not supported")
+    try:
+        plan = _profile_to_plan(profile)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    _validate_backend_capabilities(plan=plan, backend=backend, backend_name=profile.backend)
+    try:
+        dep = await manager.load(plan)
+    except RuntimeError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    return {**asdict(dep), "gpu_ids": dep.gpu_ids}
+
+
+@router.delete("/service-profiles/{name}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_service_profile(
+    name: str,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    profile = profile_store.get_by_name(conn, name)
+    if profile is None:
+        raise HTTPException(404, f"service profile {name!r} not found")
+    profile_store.delete(conn, profile.id)
 
 
 @router.delete("/deployments/{dep_id}", status_code=status.HTTP_204_NO_CONTENT)

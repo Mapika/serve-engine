@@ -79,6 +79,79 @@ async def test_create_deployment(app):
 
 
 @pytest.mark.asyncio
+async def test_service_profile_crud_and_deploy(app):
+    docker_client = app.state.manager._docker
+    captured: dict[str, list[str]] = {}
+
+    def _spy(**kwargs):
+        captured["command"] = list(kwargs["command"])
+        return ContainerHandle(id="cid", name="x", address="127.0.0.1", port=49152)
+
+    docker_client.run.side_effect = _spy
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        r = await c.post(
+            "/admin/service-profiles",
+            json={
+                "name": "qwen-chat-small",
+                "model_name": "qwen-0_5b",
+                "hf_repo": "Qwen/Qwen2.5-0.5B-Instruct",
+                "backend": "vllm",
+                "gpu_ids": [0],
+                "max_model_len": 4096,
+                "target_concurrency": 16,
+                "extra_args": {"--reasoning-parser": "qwen3"},
+            },
+        )
+        assert r.status_code == 201, r.text
+        profile = r.json()
+        assert profile["name"] == "qwen-chat-small"
+        assert profile["backend"] == "vllm"
+        assert profile["tensor_parallel"] == 1
+        assert profile["extra_args"] == {"--reasoning-parser": "qwen3"}
+
+        r = await c.get("/admin/service-profiles")
+        assert r.status_code == 200
+        assert [p["name"] for p in r.json()] == ["qwen-chat-small"]
+
+        r = await c.get("/admin/service-profiles/qwen-chat-small")
+        assert r.status_code == 200
+        assert r.json()["model_name"] == "qwen-0_5b"
+
+        r = await c.post("/admin/service-profiles/qwen-chat-small/deploy")
+        assert r.status_code == 201, r.text
+        dep = r.json()
+        assert dep["status"] == "ready"
+        assert dep["gpu_ids"] == [0]
+
+        r = await c.delete("/admin/service-profiles/qwen-chat-small")
+        assert r.status_code == 204
+
+    argv = captured["command"]
+    assert argv[argv.index("--served-model-name") + 1] == "qwen-0_5b"
+    assert argv[argv.index("--max-num-seqs") + 1] == "16"
+    assert argv[argv.index("--reasoning-parser") + 1] == "qwen3"
+
+
+@pytest.mark.asyncio
+async def test_service_profile_duplicate_409(app):
+    body = {
+        "name": "dup",
+        "model_name": "qwen",
+        "hf_repo": "org/qwen",
+        "backend": "vllm",
+        "gpu_ids": [0],
+    }
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        r1 = await c.post("/admin/service-profiles", json=body)
+        r2 = await c.post("/admin/service-profiles", json=body)
+    assert r1.status_code == 201, r1.text
+    assert r2.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_delete_model_rejects_active_deployment(app):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
