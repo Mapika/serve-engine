@@ -80,6 +80,10 @@ docker run -d --name serve \
 The daemon container does not run inference itself. It talks to the host Docker
 socket and starts separate engine containers.
 
+If `serve` is already taken by an existing shell alias (for example
+`alias serve='python -m http.server'`), invoke as `python -m serve_engine` or
+`unalias serve`.
+
 ## First Run
 
 Start the daemon:
@@ -88,6 +92,9 @@ Start the daemon:
 serve daemon start
 serve daemon status
 ```
+
+The daemon binds to `127.0.0.1:11500` by default. Front it with a reverse
+proxy if you need to expose it off-host.
 
 Create an admin key:
 
@@ -278,6 +285,9 @@ Useful `serve run` options:
 --extra '--some-engine-flag=value'
 ```
 
+A non-pinned deployment is evicted once `now - last_request_at` exceeds
+`--idle-timeout` seconds (default 300).
+
 ## Architecture
 
 ```text
@@ -359,6 +369,16 @@ Single H100 80 GB, Qwen2.5 0.5B and 1.5B, 512-token outputs, Poisson arrivals.
 
 Treat these as a sanity check, not a universal benchmark. Engine version, model
 family, context length, quantization, and GPU all matter.
+
+## GPU Sharing
+
+Two deployments can share a GPU. Before starting one, the daemon estimates its
+VRAM cost from the model config (weights at the chosen dtype, KV cache for the
+requested `--ctx` and `--max-seqs`, plus engine headroom) and only places it on
+GPUs where that fits alongside the already-running deployments. If nothing
+fits, the manager will evict non-pinned, idle deployments in LRU order to make
+room; if it still cannot fit, the start fails with a placement error rather
+than racing the existing services into an OOM.
 
 ## Development
 

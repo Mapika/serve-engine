@@ -1,7 +1,7 @@
 [project]
 name = "serve-engine"
 version = "0.0.1"
-description = "Single-node multi-user inference orchestrator over vLLM and SGLang"
+description = "Single-node multi-key inference orchestrator over vLLM and SGLang"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
