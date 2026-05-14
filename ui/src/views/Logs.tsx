@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api, getToken } from '../api'
+import { api, eventSourceUrl } from '../api'
 
 type LifecycleEvent = { kind: string; payload: any; ts: string }
 
@@ -32,39 +32,55 @@ export default function Logs() {
     setLines([])
     setStreamError('')
     setStreaming(true)
-    const token = getToken()
-    const url = token
-      ? `/admin/deployments/${selected}/logs/stream?token=${encodeURIComponent(token)}`
-      : `/admin/deployments/${selected}/logs/stream`
-    const es = new EventSource(url)
-    es.onmessage = (e: MessageEvent) => {
-      setLines(prev => {
-        const next = [...prev, e.data]
-        return next.length > 2000 ? next.slice(-2000) : next
+    let closed = false
+    let es: EventSource | null = null
+    eventSourceUrl(`/admin/deployments/${selected}/logs/stream`)
+      .then(url => {
+        if (closed) return
+        es = new EventSource(url)
+        es.onmessage = (e: MessageEvent) => {
+          setLines(prev => {
+            const next = [...prev, e.data]
+            return next.length > 2000 ? next.slice(-2000) : next
+          })
+        }
+        es.onerror = () => {
+          setStreaming(false)
+          setStreamError('stream closed (container stopped or auth failed)')
+          es?.close()
+        }
       })
-    }
-    es.onerror = () => {
+      .catch((e: Error) => {
+        setStreaming(false)
+        setStreamError(e.message)
+      })
+    return () => {
+      closed = true
       setStreaming(false)
-      setStreamError('stream closed (container stopped or auth failed)')
-      es.close()
+      es?.close()
     }
-    return () => { setStreaming(false); es.close() }
   }, [selected])
 
   useEffect(() => {
-    const token = getToken()
-    const url = token
-      ? `/admin/events?token=${encodeURIComponent(token)}`
-      : '/admin/events'
-    const es = new EventSource(url)
-    es.onmessage = (e: MessageEvent) => {
-      try {
-        const obj = JSON.parse(e.data) as LifecycleEvent
-        setEvents(prev => [obj, ...prev].slice(0, 50))
-      } catch { /* ignore */ }
+    let closed = false
+    let es: EventSource | null = null
+    eventSourceUrl('/admin/events').then(url => {
+      if (closed) return
+      es = new EventSource(url)
+      es.onmessage = (e: MessageEvent) => {
+        try {
+          const obj = JSON.parse(e.data) as LifecycleEvent
+          setEvents(prev => [obj, ...prev].slice(0, 50))
+        } catch { /* ignore */ }
+      }
+      es.onerror = () => es?.close()
+    }).catch(() => {
+      // Polling views still work; event feed is best-effort.
+    })
+    return () => {
+      closed = true
+      es?.close()
     }
-    es.onerror = () => es.close()
-    return () => es.close()
   }, [])
 
   useEffect(() => {

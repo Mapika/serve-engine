@@ -2,10 +2,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from fastapi import HTTPException
 
 from serve_engine.backends.vllm import VLLMBackend
 from serve_engine.daemon.app import build_app
 from serve_engine.lifecycle.docker_client import ContainerHandle
+from serve_engine.store import api_keys as key_store
 from serve_engine.store import db
 
 
@@ -77,6 +79,27 @@ async def test_create_deployment(app):
 
 
 @pytest.mark.asyncio
+async def test_delete_model_rejects_active_deployment(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        r = await c.post(
+            "/admin/deployments",
+            json={
+                "model_name": "llama-1b",
+                "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
+                "image_tag": "vllm/vllm-openai:v0.7.3",
+                "gpu_ids": [0],
+                "max_model_len": 8192,
+            },
+        )
+        assert r.status_code == 201, r.text
+
+        r = await c.delete("/admin/models/llama-1b")
+    assert r.status_code == 409
+    assert "must be stopped first" in r.text
+
+
+@pytest.mark.asyncio
 async def test_create_deployment_passes_extra_args_to_argv(app):
     # The fixture's docker_client is a MagicMock; we capture argv via its
     # .run side-effect so we can assert request-body extra_args reach the engine.
@@ -139,72 +162,6 @@ async def test_predictor_stats_endpoint(app):
     assert body["preloads_attempted"] == 0
     assert body["preloads_succeeded"] == 0
     assert "enabled" in body
-
-
-@pytest.mark.asyncio
-async def test_snapshot_endpoints_list_delete_gc(app, tmp_path):
-    """End-to-end /admin/snapshots: list returns rows, DELETE by key wipes
-    the row + on-disk dir, gc honors keep_last_per_model and removes the
-    blobs of evicted snapshots."""
-    from serve_engine.store import snapshots as snap_store
-
-    conn = app.state.conn
-
-    # Seed three snapshots for the same engine/model so GC keep_last=1
-    # removes the two older ones.
-    snap_root = tmp_path / "snapshots"
-    snap_root.mkdir()
-    ids: list[int] = []
-    for i in range(3):
-        d = snap_root / f"key{i}"
-        d.mkdir()
-        (d / "torch_cache").mkdir()
-        (d / "torch_cache" / "blob.bin").write_bytes(b"x" * 1024)
-        row = snap_store.add(
-            conn, key=f"key{i}",
-            hf_repo="org/model", revision="main",
-            engine="vllm", engine_image="vllm/vllm-openai:v0.20.2",
-            gpu_arch="9.0", quantization=None,
-            max_model_len=4096, dtype="auto",
-            tensor_parallel=1, target_concurrency=8,
-            local_path=str(d), size_mb=1,
-        )
-        ids.append(row.id)
-        # Spread last_used_at so list ordering is deterministic.
-        conn.execute(
-            "UPDATE snapshots SET last_used_at = datetime('now', ?) WHERE id=?",
-            (f"-{i * 10} minutes", row.id),
-        )
-
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=10) as c:
-        r = await c.get("/admin/snapshots")
-        assert r.status_code == 200
-        listed = r.json()
-        assert len(listed) == 3
-        # First entry should be the newest (key0 — last_used_at most recent).
-        assert listed[0]["key"] == "key0"
-        assert listed[0]["key_prefix"] == "key0"
-
-        # Delete key2 explicitly; its directory must be gone afterward.
-        d2 = snap_root / "key2"
-        r = await c.delete("/admin/snapshots/key2")
-        assert r.status_code == 204, r.text
-        assert not d2.exists()
-        assert snap_store.get_by_key(conn, "key2") is None
-
-        # GC with keep_last=1 should drop key1 (we already deleted key2).
-        r = await c.post(
-            "/admin/snapshots/gc",
-            json={"keep_last_per_model": 1},
-        )
-        assert r.status_code == 200, r.text
-        body = r.json()
-        assert body["removed"] == 1
-        assert snap_store.get_by_key(conn, "key1") is None
-        assert snap_store.get_by_key(conn, "key0") is not None
-        # Disk dir for key1 should be gone too.
-        assert not (snap_root / "key1").exists()
 
 
 @pytest.mark.asyncio
@@ -480,3 +437,25 @@ async def test_admin_route_requires_admin_tier(tmp_path, monkeypatch):
             headers={"Authorization": f"Bearer {admin_secret}"},
         )
         assert r.status_code == 200
+
+
+def test_stream_ticket_authorizes_only_stream_routes(app):
+    from unittest.mock import MagicMock
+
+    from serve_engine.daemon.admin import require_admin_key
+
+    key_store.create(app.state.conn, name="root", tier="admin")
+    token, _ = app.state.stream_tokens.issue()
+    request = MagicMock()
+    request.method = "GET"
+    request.scope = {"client": ("127.0.0.1", 12345)}
+    request.url.path = "/admin/events"
+    request.query_params = {"stream_token": token}
+    request.app = app
+
+    assert require_admin_key(request) is None
+
+    request.url.path = "/admin/keys"
+    with pytest.raises(HTTPException) as exc:
+        require_admin_key(request)
+    assert exc.value.status_code == 401

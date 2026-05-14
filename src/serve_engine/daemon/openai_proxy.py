@@ -87,15 +87,16 @@ async def _proxy(
     cold_loaded = False
     if target.adapter_name:
         manager = request.app.state.manager
-        try:
-            cold_loaded = await ensure_adapter_loaded(
-                conn, backend, active, target.adapter_name,
-                models_dir=manager._models_dir,
-            )
-        except UnknownModel as e:
-            raise HTTPException(404, detail=str(e)) from e
-        except RuntimeError as e:
-            raise HTTPException(502, detail=f"adapter load failed: {e}") from e
+        async with manager.adapter_lock(active.id):
+            try:
+                cold_loaded = await ensure_adapter_loaded(
+                    conn, backend, active, target.adapter_name,
+                    models_dir=manager._models_dir,
+                )
+            except UnknownModel as e:
+                raise HTTPException(404, detail=str(e)) from e
+            except RuntimeError as e:
+                raise HTTPException(502, detail=f"adapter load failed: {e}") from e
 
     dep_store.touch_last_request(conn, active.id)
     request.app.state.request_count += 1
@@ -170,10 +171,9 @@ async def _proxy(
                 _usage_events_store.set_tokens(
                     conn, usage_event_id, tokens_in=tin, tokens_out=tout,
                 )
-            if key is not None:
-                _key_usage_store.record(
-                    conn, key_id=key.id, tokens_in=tin, tokens_out=tout,
-                    model_name=model_name,
+            if key is not None and key.usage_event_id is not None:
+                _key_usage_store.set_tokens(
+                    conn, key.usage_event_id, tokens_in=tin, tokens_out=tout,
                 )
 
     return StreamingResponse(

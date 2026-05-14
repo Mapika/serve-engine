@@ -133,7 +133,7 @@ Everything the daemon owns lives under `~/.serve/` (override the parent via the 
 ```
 ~/.serve/
 ├── db.sqlite               state — models, deployments, adapters, usage,
-│                           snapshots, api_keys, key_usage_events
+│                           api_keys, key_usage_events
 ├── sock                    Unix-domain control socket (CLI ↔ daemon)
 ├── logs/
 │   └── daemon.log          daemon stdout/stderr
@@ -141,18 +141,12 @@ Everything the daemon owns lives under `~/.serve/` (override the parent via the 
 │   └── models--<owner>--<repo>/snapshots/<rev>/…
 ├── configs/                per-deployment engine YAMLs (TRT-LLM --config)
 │   └── <deployment_id>.yml
-├── snapshots/              torch.compile inductor caches, one dir per
-│   │                       content-addressable snapshot_key
-│   └── <sha256>/
-│       └── torch_compile_cache/  (vLLM) or torch_inductor/ (SGLang)
-├── snapshots.yaml          optional — snapshot GC tuning (keep_last_per_model,
-│                           max_disk_gb, tick_s). Defaults applied if absent.
 ├── predictor.yaml          optional — predictor tuning (enabled, tick_interval_s,
 │                           per-rule thresholds). Defaults applied if absent.
 └── backends.override.yaml  optional — pin different engine image tags / headroom
 ```
 
-Adapter blobs live alongside model weights under `models/`. Snapshot blobs are bind-mounted into the engine containers read-write so torch.compile artifacts persist across deployments.
+Adapter blobs live alongside model weights under `models/`.
 
 ## Tested performance
 

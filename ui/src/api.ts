@@ -12,6 +12,13 @@ export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
 }
 
+export async function eventSourceUrl(path: string): Promise<string> {
+  if (!getToken()) return path
+  const ticket = await api.createStreamToken()
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}stream_token=${encodeURIComponent(ticket.token)}`
+}
+
 async function jfetch<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const token = getToken()
@@ -42,6 +49,7 @@ export const api = {
   revokeKey: (id: number) => jfetch<void>('DELETE', `/admin/keys/${id}`),
   listGpus: () => jfetch<any[]>('GET', '/admin/gpus'),
   loadModel: (b: any) => jfetch<any>('POST', '/admin/deployments', b),
+  createStreamToken: () => jfetch<{ token: string; expires_at: number }>('POST', '/admin/stream-token'),
 
   // Adapters (Sub-project A)
   listAdapters: () => jfetch<any[]>('GET', '/admin/adapters'),
@@ -56,12 +64,6 @@ export const api = {
     jfetch<any>('POST', `/admin/deployments/${depId}/adapters/${name}`),
   hotUnloadAdapter: (depId: number, name: string) =>
     jfetch<void>('DELETE', `/admin/deployments/${depId}/adapters/${name}`),
-
-  // Snapshots (Sub-project B)
-  listSnapshots: () => jfetch<any[]>('GET', '/admin/snapshots'),
-  deleteSnapshot: (key: string) => jfetch<void>('DELETE', `/admin/snapshots/${key}`),
-  gcSnapshots: (b: { keep_last_per_model: number; max_disk_gb?: number | null }) =>
-    jfetch<any>('POST', '/admin/snapshots/gc', b),
 
   // Predictor (Sub-project C)
   predictorCandidates: () => jfetch<any[]>('GET', '/admin/predictor/candidates'),

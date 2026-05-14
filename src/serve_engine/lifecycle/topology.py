@@ -21,8 +21,7 @@ class GPUInfo:
     name: str
     total_mb: int
     # CUDA compute capability as "{major}.{minor}" (e.g., "9.0" for H100,
-    # "12.0" for Blackwell). Feeds the snapshot key — restoring an
-    # H100-built snapshot on a Blackwell card would corrupt cuda graphs.
+    # "12.0" for Blackwell).
     # Default is the empty marker for tests / mocks that don't care.
     compute_cap: str = ""
 

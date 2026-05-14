@@ -57,71 +57,6 @@ def _patch_externals(monkeypatch, tmp_path, vram_mb=20_000):
     (tmp_path / "weights").mkdir(exist_ok=True)
 
 
-@pytest.fixture
-def topo_one_gpu_with_cap():
-    return Topology(
-        gpus=[GPUInfo(index=0, name="H100", total_mb=80 * 1024, compute_cap="9.0")],
-        _islands={0: frozenset({0})},
-    )
-
-
-def test_load_uses_snapshot_path_when_supported(
-    conn, monkeypatch, tmp_path, topo_one_gpu_with_cap,
-):
-    """When the backend opts into snapshots, manager.load (a) bind-mounts
-    ~/.serve/snapshots/<key>/ at /snapshots, (b) injects
-    TORCHINDUCTOR_CACHE_DIR=/snapshots/torch_cache, and (c) inserts a
-    snapshots row in the background after warmup. Save delay is 0 in
-    tests so we can drain pending saves explicitly."""
-    captured = {}
-
-    def _capture(**kw):
-        captured.update(kw)
-        return ContainerHandle(id="cid", name="x", address="127.0.0.1", port=49152)
-
-    docker_client = MagicMock()
-    docker_client.run.side_effect = _capture
-    _patch_externals(monkeypatch, tmp_path, vram_mb=20_000)
-
-    snapshots_dir = tmp_path / "snapshots"
-    mgr = LifecycleManager(
-        conn=conn, docker_client=docker_client,
-        backends={"vllm": VLLMBackend()}, models_dir=tmp_path,
-        topology=topo_one_gpu_with_cap,
-        snapshots_dir=snapshots_dir,
-        snapshot_save_delay_s=0.0,
-    )
-    model_store.add(conn, name="llama-1b", hf_repo="meta-llama/Llama-3.2-1B-Instruct")
-
-    async def _do():
-        dep = await mgr.load(_make_plan())
-        await mgr.await_pending_snapshot_saves()
-        return dep
-
-    dep = asyncio.run(_do())
-    assert dep.status == "ready"
-
-    # Snapshot bind-mount present in container volumes.
-    volumes = captured["volumes"]
-    snapshot_hosts = [p for p in volumes if "snapshots" in p]
-    assert len(snapshot_hosts) == 1
-    assert volumes[snapshot_hosts[0]] == {"bind": "/snapshots", "mode": "rw"}
-
-    # vLLM cache root set in container env (vLLM 0.20.2 stores its compile
-    # cache under VLLM_CACHE_ROOT, not TORCHINDUCTOR_CACHE_DIR).
-    env = captured["environment"]
-    assert env.get("VLLM_CACHE_ROOT") == "/snapshots"
-
-    # Snapshot row inserted with size sampled from disk.
-    from serve_engine.store import snapshots as snap_store
-    rows = snap_store.list_all(conn)
-    assert len(rows) == 1
-    assert rows[0].engine == "vllm"
-    assert rows[0].gpu_arch == "9.0"
-    assert rows[0].hf_repo == "meta-llama/Llama-3.2-1B-Instruct"
-    assert rows[0].local_path.endswith(rows[0].key)
-
-
 def test_load_starts_engine_and_marks_ready(conn, monkeypatch, tmp_path, topo_one_gpu):
     docker_client = MagicMock()
     docker_client.run.return_value = ContainerHandle(
@@ -350,7 +285,7 @@ def test_reconcile_keeps_running_container(conn, monkeypatch, tmp_path, topo_one
     assert refreshed.status == "ready"  # unchanged
 
 
-def test_stop_all_stops_every_ready(conn, monkeypatch, tmp_path, topo_one_gpu):
+def test_stop_all_stops_every_non_stopped_deployment(conn, monkeypatch, tmp_path, topo_one_gpu):
     docker_client = MagicMock()
     mgr = LifecycleManager(
         conn=conn, docker_client=docker_client,
@@ -358,7 +293,13 @@ def test_stop_all_stops_every_ready(conn, monkeypatch, tmp_path, topo_one_gpu):
         topology=topo_one_gpu,
     )
     m = model_store.add(conn, name="llama-1b", hf_repo="org/x")
-    for cid in ("c1", "c2", "c3"):
+    for cid, status in (
+        ("c1", "ready"),
+        ("c2", "loading"),
+        ("c3", "stopping"),
+        ("c4", "failed"),
+        ("c5", "stopped"),
+    ):
         d = dep_store.create(
             conn, model_id=m.id, backend="vllm", image_tag="img:v1",
             gpu_ids=[0], tensor_parallel=1, max_model_len=4096, dtype="auto",
@@ -367,15 +308,51 @@ def test_stop_all_stops_every_ready(conn, monkeypatch, tmp_path, topo_one_gpu):
             conn, d.id, container_id=cid, container_name=cid,
             container_port=49152, container_address="127.0.0.1",
         )
-        dep_store.update_status(conn, d.id, "ready")
+        dep_store.update_status(conn, d.id, status)
 
     asyncio.run(mgr.stop_all())
 
-    # All three should be stopped
     statuses = [dep.status for dep in dep_store.list_all(conn)]
     assert all(s == "stopped" for s in statuses)
-    assert docker_client.stop.call_count == 3
+    assert docker_client.stop.call_count == 4
 
+
+def test_reconcile_fails_loading_container_that_never_becomes_healthy(
+    conn, monkeypatch, tmp_path, topo_one_gpu,
+):
+    docker_client = MagicMock()
+    inner_client = MagicMock()
+    fake_container = MagicMock()
+    fake_container.status = "running"
+    inner_client.containers.get.return_value = fake_container
+    docker_client._client = inner_client
+    monkeypatch.setattr(
+        "serve_engine.lifecycle.manager.wait_healthy",
+        AsyncMock(return_value=False),
+    )
+
+    mgr = LifecycleManager(
+        conn=conn, docker_client=docker_client,
+        backends={"vllm": VLLMBackend()}, models_dir=tmp_path,
+        topology=topo_one_gpu,
+    )
+    m = model_store.add(conn, name="llama-1b", hf_repo="org/x")
+    d = dep_store.create(
+        conn, model_id=m.id, backend="vllm", image_tag="img:v1",
+        gpu_ids=[0], tensor_parallel=1, max_model_len=4096, dtype="auto",
+    )
+    dep_store.set_container(
+        conn, d.id, container_id="loading_cid", container_name="x",
+        container_port=49152, container_address="127.0.0.1",
+    )
+    dep_store.update_status(conn, d.id, "loading")
+
+    asyncio.run(mgr.reconcile())
+
+    refreshed = dep_store.get_by_id(conn, d.id)
+    assert refreshed.status == "failed"
+    assert "deployment was loading" in (refreshed.last_error or "")
+    docker_client.stop.assert_called_once_with("loading_cid", timeout=30)
 
 
 def test_load_writes_engine_config_yaml_and_mounts_it(conn, monkeypatch, tmp_path, topo_one_gpu):

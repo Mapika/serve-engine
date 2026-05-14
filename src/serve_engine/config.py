@@ -7,7 +7,6 @@ SERVE_DIR = Path(os.environ.get("SERVE_HOME", Path.home() / ".serve"))
 MODELS_DIR = SERVE_DIR / "models"
 LOGS_DIR = SERVE_DIR / "logs"
 CONFIGS_DIR = SERVE_DIR / "configs"  # per-deployment engine YAMLs (TRT-LLM --config)
-SNAPSHOTS_DIR = SERVE_DIR / "snapshots"  # per-snapshot-key inductor caches
 DB_PATH = SERVE_DIR / "db.sqlite"
 SOCK_PATH = SERVE_DIR / "sock"
 

@@ -10,13 +10,31 @@ def record(
     tokens_in: int,
     tokens_out: int,
     model_name: str | None = None,
-) -> None:
-    conn.execute(
+) -> int:
+    cur = conn.execute(
         """
         INSERT INTO key_usage_events (key_id, tokens_in, tokens_out, model_name)
         VALUES (?, ?, ?, ?)
         """,
         (key_id, tokens_in, tokens_out, model_name),
+    )
+    return int(cur.lastrowid or 0)
+
+
+def set_tokens(
+    conn: sqlite3.Connection,
+    event_id: int,
+    *,
+    tokens_in: int,
+    tokens_out: int,
+) -> None:
+    conn.execute(
+        """
+        UPDATE key_usage_events
+        SET tokens_in=?, tokens_out=?
+        WHERE id=?
+        """,
+        (tokens_in, tokens_out, event_id),
     )
 
 

@@ -21,7 +21,6 @@ from serve_engine.cli import (  # noqa: E402
     pull_cmd,  # noqa: F401  registers command
     run_cmd,  # noqa: F401  registers command
     setup_cmd,  # noqa: F401  registers command
-    snapshot_cmd,  # noqa: F401  registers `snapshot` sub-app (Sub-project B)
     stop_cmd,  # noqa: F401  registers command
     top_cmd,  # noqa: F401  registers command
     update_engines_cmd,  # noqa: F401  registers command

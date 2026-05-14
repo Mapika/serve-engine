@@ -21,6 +21,7 @@ class ApiKey:
     rpw_override: int | None
     tpw_override: int | None
     revoked_at: str | None
+    usage_event_id: int | None = None
 
 
 def _hash(secret: str) -> str:

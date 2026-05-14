@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 
 from fastapi import HTTPException, Request, status
 
 from serve_engine.auth import limiter
 from serve_engine.auth.tiers import Limits
-from serve_engine.store import api_keys
+from serve_engine.store import api_keys, key_usage
 
 
 def _extract_bearer(authorization: str | None) -> str | None:
@@ -21,9 +22,7 @@ def _extract_bearer(authorization: str | None) -> str | None:
 def require_auth_dep(request: Request) -> api_keys.ApiKey | None:
     """FastAPI dependency. Returns the ApiKey on success, raises 401/429 on failure.
 
-    Auth sources, in order:
-      1. `Authorization: Bearer sk-...` header (preferred).
-      2. `?token=sk-...` query parameter (for EventSource etc.).
+    Auth source: `Authorization: Bearer sk-...` header.
 
     If no keys exist in the table, auth is bypassed (returns None).
     """
@@ -33,11 +32,6 @@ def require_auth_dep(request: Request) -> api_keys.ApiKey | None:
 
     auth_header = request.headers.get("authorization")
     secret = _extract_bearer(auth_header)
-    if secret is None:
-        # Fallback: query param. Used by EventSource and similar APIs that
-        # cannot set request headers.
-        secret = request.query_params.get("token")
-
     if not secret:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
@@ -53,14 +47,20 @@ def require_auth_dep(request: Request) -> api_keys.ApiKey | None:
         )
 
     tier_cfg: dict[str, Limits] = request.app.state.tier_cfg
-    decision = limiter.check(conn, key=key, tier_cfg=tier_cfg)
-    if isinstance(decision, limiter.Denied):
-        raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                f"{decision.limit_name} limit reached "
-                f"({decision.current}/{decision.limit_value} in {decision.window_s}s)"
-            ),
-            headers={"Retry-After": str(decision.retry_after_s)},
-        )
-    return key
+    usage_event_id: int | None = None
+    with conn.locked():
+        decision = limiter.check(conn, key=key, tier_cfg=tier_cfg)
+        if isinstance(decision, limiter.Denied):
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"{decision.limit_name} limit reached "
+                    f"({decision.current}/{decision.limit_value} in {decision.window_s}s)"
+                ),
+                headers={"Retry-After": str(decision.retry_after_s)},
+            )
+        if request.url.path.startswith("/v1/"):
+            usage_event_id = key_usage.record(
+                conn, key_id=key.id, tokens_in=0, tokens_out=0,
+            )
+    return replace(key, usage_event_id=usage_event_id)

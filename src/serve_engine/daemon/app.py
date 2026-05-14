@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from serve_engine.auth.stream_tokens import StreamTokenStore
 from serve_engine.auth.tiers import load_tiers
 from serve_engine.backends.base import Backend
 from serve_engine.daemon.admin import router as admin_router
@@ -28,11 +29,13 @@ def _attach_state(
     backends: dict[str, Backend],
     manager: LifecycleManager,
     event_bus: EventBus,
+    stream_tokens: StreamTokenStore,
 ) -> None:
     app.state.conn = conn
     app.state.backends = backends
     app.state.manager = manager
     app.state.event_bus = event_bus
+    app.state.stream_tokens = stream_tokens
     app.state.tier_cfg = load_tiers()
     app.state.request_count = 0
 
@@ -49,7 +52,6 @@ def build_apps(
     models_dir: Path,
     topology: Topology | None = None,
     configs_dir: Path | None = None,
-    snapshots_dir: Path | None = None,
 ) -> tuple[FastAPI, FastAPI]:
     """Returns (tcp_app, uds_app) sharing the same LifecycleManager.
 
@@ -59,6 +61,7 @@ def build_apps(
       No separate lifespan — shares the single Reaper and manager with tcp_app.
     """
     event_bus = EventBus()
+    stream_tokens = StreamTokenStore()
     manager = LifecycleManager(
         conn=conn,
         docker_client=docker_client,
@@ -67,29 +70,19 @@ def build_apps(
         topology=topology,
         event_bus=event_bus,
         configs_dir=configs_dir,
-        snapshots_dir=snapshots_dir,
     )
 
     from serve_engine.lifecycle.predictor_task import PredictorTask
     from serve_engine.lifecycle.reaper import Reaper
-    from serve_engine.lifecycle.snapshot_gc import SnapshotGc
     from serve_engine.store import deployments as _dep_store
     reaper = Reaper(
         manager=manager,
         list_ready=lambda: _dep_store.list_ready(conn),
     )
-    # Snapshot eviction loop. Reads ~/.serve/snapshots.yaml each tick so
-    # operators can adjust keep_last_per_model / max_disk_gb without a
-    # daemon restart. Defaults to keep_last_per_model=2 + no disk cap;
-    # ticks every 6 hours.
-    from serve_engine import config as _cfg
-    snapshot_gc = SnapshotGc(
-        conn=conn,
-        cfg_path=_cfg.SERVE_DIR / "snapshots.yaml",
-    )
     # Sub-project C: predictor pre-warms adapters every tick_interval_s
     # using the rule-based scorer over usage_events. Reads
     # ~/.serve/predictor.yaml each ctor — operators tune via that file.
+    from serve_engine import config as _cfg
     from serve_engine.lifecycle.predictor import PredictorConfig
     from serve_engine.lifecycle.usage_rollup_task import UsageRollupTask
     predictor_cfg = PredictorConfig.load(_cfg.SERVE_DIR / "predictor.yaml")
@@ -112,26 +105,13 @@ def build_apps(
             await manager.reconcile()
         except Exception:
             log.exception("reconcile failed; continuing")
-        # Run one GC pass at startup so a restarted daemon catches up on
-        # any snapshots that landed but exceeded policy since last tick.
-        try:
-            result = await snapshot_gc.tick_once()
-            if result["removed"] > 0:
-                log.info(
-                    "startup snapshot gc: removed %d, %d MB remaining",
-                    result["removed"], result["remaining_mb"],
-                )
-        except Exception:
-            log.exception("startup snapshot gc failed; continuing")
         reaper.start()
-        snapshot_gc.start()
         predictor_task.start()
         rollup_task.start()
         yield
         # Shutdown
         await rollup_task.stop()
         await predictor_task.stop()
-        await snapshot_gc.stop()
         await reaper.stop()
         try:
             await manager.stop_all()
@@ -139,7 +119,14 @@ def build_apps(
             log.exception("stop_all on shutdown failed")
 
     tcp_app = FastAPI(title="serve-engine (public)", version="0.0.1", lifespan=lifespan)
-    _attach_state(tcp_app, conn=conn, backends=backends, manager=manager, event_bus=event_bus)
+    _attach_state(
+        tcp_app,
+        conn=conn,
+        backends=backends,
+        manager=manager,
+        event_bus=event_bus,
+        stream_tokens=stream_tokens,
+    )
     tcp_app.state.predictor_task = predictor_task
     tcp_app.include_router(openai_router)
     tcp_app.include_router(metrics_router)
@@ -147,7 +134,14 @@ def build_apps(
     install_ui(tcp_app)
 
     uds_app = FastAPI(title="serve-engine (control)", version="0.0.1")
-    _attach_state(uds_app, conn=conn, backends=backends, manager=manager, event_bus=event_bus)
+    _attach_state(
+        uds_app,
+        conn=conn,
+        backends=backends,
+        manager=manager,
+        event_bus=event_bus,
+        stream_tokens=stream_tokens,
+    )
     uds_app.state.predictor_task = predictor_task
     uds_app.include_router(openai_router)
     uds_app.include_router(admin_router)

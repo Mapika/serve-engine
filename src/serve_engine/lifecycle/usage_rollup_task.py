@@ -1,11 +1,4 @@
-"""Daemon-lifespan task that rolls usage_events older than
-PredictorConfig.retention_days into usage_aggregates and drops the
-raw rows.
-
-Ticks once per day by default — the cost is bounded and the cadence
-matches the design's "nightly rollup" note. Uses the same lifespan
-pattern as Reaper / SnapshotGc.
-"""
+"""Daemon task that rolls old usage_events into usage_aggregates."""
 from __future__ import annotations
 
 import asyncio

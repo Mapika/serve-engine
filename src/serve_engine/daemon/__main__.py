@@ -63,7 +63,6 @@ async def serve(public_host: str, public_port: int, sock_path: Path) -> None:
         models_dir=config.MODELS_DIR,
         topology=topology,
         configs_dir=config.CONFIGS_DIR,
-        snapshots_dir=config.SNAPSHOTS_DIR,
     )
 
     if sock_path.exists():

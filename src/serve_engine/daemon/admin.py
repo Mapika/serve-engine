@@ -20,7 +20,6 @@ from serve_engine.store import api_keys as _ak_store
 from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
-from serve_engine.store import snapshots as snapshot_store
 
 
 def _is_uds_request(request: Request) -> bool:
@@ -33,6 +32,16 @@ def _is_uds_request(request: Request) -> bool:
     """
     client = request.scope.get("client")
     return client is None
+
+
+def _is_stream_ticket_request(request: Request) -> bool:
+    if request.method != "GET":
+        return False
+    path = request.url.path
+    return path == "/admin/events" or (
+        path.startswith("/admin/deployments/")
+        and path.endswith("/logs/stream")
+    )
 
 
 def require_admin_key(
@@ -51,6 +60,11 @@ def require_admin_key(
     """
     if _is_uds_request(request):
         return None
+    stream_token = request.query_params.get("stream_token")
+    if stream_token and _is_stream_ticket_request(request):
+        store = getattr(request.app.state, "stream_tokens", None)
+        if store is not None and store.validate(stream_token):
+            return None
     key = require_auth_dep(request)
     if key is None:
         return None
@@ -260,6 +274,21 @@ def delete_model(name: str, conn: sqlite3.Connection = Depends(get_conn)):
     m = model_store.get_by_name(conn, name)
     if m is None:
         raise HTTPException(404, f"model {name!r} not found")
+    blocking = [
+        d for d in dep_store.list_all(conn)
+        if d.model_id == m.id
+        and (
+            d.status in dep_store.ACTIVE_STATUSES
+            or d.status == "stopping"
+            or (d.status == "failed" and d.container_id is not None)
+        )
+    ]
+    if blocking:
+        ids = ", ".join(f"#{d.id}:{d.status}" for d in blocking)
+        raise HTTPException(
+            409,
+            f"model {name!r} has deployments that must be stopped first: {ids}",
+        )
     model_store.delete(conn, m.id)
 
 
@@ -529,52 +558,54 @@ async def hot_load_adapter(
             f"deployment {dep_id} was started with max_loras=0; "
             "restart with --max-loras N to enable adapter hot-load",
         )
-    a = ad_store.get_by_name(conn, adapter_name)
-    if a is None:
-        raise HTTPException(404, f"adapter {adapter_name!r} not registered")
-    if a.local_path is None:
-        raise HTTPException(
-            409,
-            f"adapter {adapter_name!r} not downloaded; "
-            f"POST /admin/adapters/{adapter_name}/download first",
-        )
-    if a.base_model.id != dep.model_id:
-        raise HTTPException(
-            409,
-            f"adapter base {a.base_model.name!r} does not match "
-            f"deployment model_id {dep.model_id}",
-        )
+    async with manager.adapter_lock(dep.id):
+        a = ad_store.get_by_name(conn, adapter_name)
+        if a is None:
+            raise HTTPException(404, f"adapter {adapter_name!r} not registered")
+        if a.local_path is None:
+            raise HTTPException(
+                409,
+                f"adapter {adapter_name!r} not downloaded; "
+                f"POST /admin/adapters/{adapter_name}/download first",
+            )
+        if a.base_model.id != dep.model_id:
+            raise HTTPException(
+                409,
+                f"adapter base {a.base_model.name!r} does not match "
+                f"deployment model_id {dep.model_id}",
+            )
 
-    # If slots full, evict LRU adapter in this deployment first.
-    if da_store.count_for_deployment(conn, dep.id) >= dep.max_loras:
-        victim = da_store.lru_for_deployment(conn, dep.id)
-        if victim is not None and victim.id != a.id:
-            await _engine_unload_adapter(backend, dep, victim.name)
-            da_store.detach(conn, dep.id, victim.id)
+        victim = None
+        # If slots full, evict LRU adapter in this deployment first.
+        if da_store.count_for_deployment(conn, dep.id) >= dep.max_loras:
+            victim = da_store.lru_for_deployment(conn, dep.id)
+            if victim is not None and victim.id != a.id:
+                await _engine_unload_adapter(backend, dep, victim.name)
+                da_store.detach(conn, dep.id, victim.id)
 
-    # Translate host adapter path into in-container path (mounted at /cache).
-    container_path = "/cache/" + str(
-        Path(a.local_path).resolve().relative_to(manager._models_dir.resolve())
-    )
-    body = {"lora_name": a.name, "lora_path": container_path}
-    url = (
-        f"http://{dep.container_address}:{dep.container_port}"
-        f"{backend.adapter_load_path}"
-    )
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            r = await client.post(url, json=body)
-        except httpx.HTTPError as e:
-            raise HTTPException(502, f"engine adapter load failed: {e}") from e
-    if r.status_code >= 400:
-        raise HTTPException(
-            502, f"engine returned {r.status_code}: {r.text[:200]}",
+        # Translate host adapter path into in-container path (mounted at /cache).
+        container_path = "/cache/" + str(
+            Path(a.local_path).resolve().relative_to(manager._models_dir.resolve())
         )
-    da_store.attach(conn, dep.id, a.id)
-    return {
-        "deployment_id": dep.id, "adapter": a.name,
-        "evicted": victim.name if 'victim' in locals() and victim else None,
-    }
+        body = {"lora_name": a.name, "lora_path": container_path}
+        url = (
+            f"http://{dep.container_address}:{dep.container_port}"
+            f"{backend.adapter_load_path}"
+        )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                r = await client.post(url, json=body)
+            except httpx.HTTPError as e:
+                raise HTTPException(502, f"engine adapter load failed: {e}") from e
+        if r.status_code >= 400:
+            raise HTTPException(
+                502, f"engine returned {r.status_code}: {r.text[:200]}",
+            )
+        da_store.attach(conn, dep.id, a.id)
+        return {
+            "deployment_id": dep.id, "adapter": a.name,
+            "evicted": victim.name if victim else None,
+        }
 
 
 @router.delete(
@@ -625,47 +656,6 @@ async def _engine_unload_adapter(
         )
 
 
-# -------- Snapshots (Sub-project B) --------
-
-
-class SnapshotGcRequest(BaseModel):
-    keep_last_per_model: int = 2
-    max_disk_gb: float | None = None
-
-
-@router.get("/snapshots")
-def list_snapshots(conn: sqlite3.Connection = Depends(get_conn)):
-    """List all snapshot index rows, newest-used first."""
-    return [
-        {
-            **asdict(s),
-            "key_prefix": s.key[:8],
-        }
-        for s in snapshot_store.list_all(conn)
-    ]
-
-
-@router.delete("/snapshots/{key}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_snapshot(
-    key: str,
-    conn: sqlite3.Connection = Depends(get_conn),
-    manager: LifecycleManager = Depends(get_manager),
-):
-    """Remove a snapshot's index row + on-disk dir. Passing key='all' wipes
-    every snapshot (manual reset; the GC endpoint is the usual path)."""
-    from serve_engine.lifecycle.snapshot_gc import _remove_blob
-    if key == "all":
-        for s in snapshot_store.list_all(conn):
-            _remove_blob(Path(s.local_path))
-            snapshot_store.delete(conn, s.id)
-        return
-    s = snapshot_store.get_by_key(conn, key)
-    if s is None:
-        raise HTTPException(404, f"snapshot {key!r} not found")
-    _remove_blob(Path(s.local_path))
-    snapshot_store.delete(conn, s.id)
-
-
 @router.get("/predictor/candidates")
 def predictor_candidates(request: Request):
     """Current top-N predictor candidates with score + reason. Drives
@@ -713,23 +703,6 @@ def predictor_stats(request: Request):
         "base_prewarms_succeeded": task.base_prewarms_succeeded,
         "base_prewarms_skipped_no_plan": task.base_prewarms_skipped_no_plan,
     }
-
-
-@router.post("/snapshots/gc")
-def gc_snapshots(
-    body: SnapshotGcRequest,
-    conn: sqlite3.Connection = Depends(get_conn),
-    manager: LifecycleManager = Depends(get_manager),
-):
-    """Two-step eviction: (1) per-(engine, hf_repo) keep newest N, drop
-    the rest; (2) if max_disk_gb is set and the total still exceeds it,
-    LRU-evict globally until under cap. Shared with the background loop."""
-    from serve_engine.lifecycle.snapshot_gc import run_gc
-    return run_gc(
-        conn,
-        keep_last_per_model=body.keep_last_per_model,
-        max_disk_gb=body.max_disk_gb,
-    )
 
 
 @router.post("/deployments/{dep_id}/pin", status_code=status.HTTP_204_NO_CONTENT)
@@ -830,6 +803,12 @@ class CreateKeyRequest(BaseModel):
     tpd_override: int | None = None
     rpw_override: int | None = None
     tpw_override: int | None = None
+
+
+@router.post("/stream-token")
+def create_stream_token(request: Request):
+    token, expires_at = request.app.state.stream_tokens.issue()
+    return {"token": token, "expires_at": expires_at}
 
 
 @router.get("/keys")

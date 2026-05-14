@@ -9,17 +9,6 @@ class SGLangBackend(ContainerBackend):
     # SGLang's runtime adapter endpoints sit at root, NOT under /v1/.
     adapter_load_path = "/load_lora_adapter"
     adapter_unload_path = "/unload_lora_adapter"
-    # SGLang v0.5.11 has no cache-dir flag of its own but honors
-    # TORCHINDUCTOR_CACHE_DIR via the upstream torch.compile stack —
-    # persists the inductor compile cache across deployments.
-    supports_snapshots = True
-
-    def snapshot_env(self, snapshot_path: str) -> dict[str, str]:
-        if not self.supports_snapshots:
-            return {}
-        return {
-            "TORCHINDUCTOR_CACHE_DIR": f"{self.SNAPSHOT_MOUNT_PATH}/torch_inductor",
-        }
 
     def build_argv(
         self,

@@ -1,4 +1,3 @@
-from serve_engine.backends.trtllm import TRTLLMBackend
 from serve_engine.backends.vllm import VLLMBackend
 from serve_engine.lifecycle.plan import DeploymentPlan
 
@@ -111,39 +110,3 @@ def test_build_argv_lora_flags_survive_extra_args():
     occurrences = [i for i, x in enumerate(argv) if x == "--max-loras"]
     assert len(occurrences) == 1
     assert argv[occurrences[0] + 1] == "8"
-
-
-def test_supports_snapshots_defaults_to_false():
-    """The base ContainerBackend snapshot hook is opt-in. Backends that
-    haven't been wired (TRT-LLM here, until NVIDIA's PyTorch-backend
-    story matures) stay False."""
-    assert TRTLLMBackend.supports_snapshots is False
-
-
-def test_snapshot_mount_default_empty():
-    """Backends without snapshot support return no mounts."""
-    assert TRTLLMBackend().snapshot_mount("/snapshots/abc") == {}
-
-
-def test_snapshot_load_argv_default_empty():
-    """Backends without snapshot support emit no extra flags."""
-    assert TRTLLMBackend().snapshot_load_argv("/snapshots/abc") == []
-
-
-def test_snapshot_env_default_empty():
-    """Backends without snapshot support inject no extra env vars."""
-    assert TRTLLMBackend().snapshot_env("/snapshots/abc") == {}
-
-
-def test_vllm_snapshot_flag_and_hooks():
-    """vLLM 0.20.2 stores its torch.compile cache under VLLM_CACHE_ROOT
-    (NOT TORCHINDUCTOR_CACHE_DIR). Pointing VLLM_CACHE_ROOT at the
-    bind-mounted /snapshots dir is what persists the cache."""
-    b = VLLMBackend()
-    assert b.supports_snapshots is True
-    mounts = b.snapshot_mount("/host/snapshots/abc")
-    assert mounts == {"/host/snapshots/abc": {"bind": "/snapshots", "mode": "rw"}}
-    env = b.snapshot_env("/host/snapshots/abc")
-    assert env == {"VLLM_CACHE_ROOT": "/snapshots"}
-    # No extra argv needed — env var alone suffices for vLLM 0.20.x.
-    assert b.snapshot_load_argv("/host/snapshots/abc") == []
