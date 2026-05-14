@@ -115,8 +115,6 @@ def connect(path: Path) -> sqlite3.Connection:
     statement commits immediately. This is necessary because the daemon
     shares a single long-lived connection across handlers that don't manage
     transactions explicitly - without autocommit, writes are lost on shutdown.
-    Plan 02 will likely move to connection-per-request and re-introduce
-    explicit transactions where useful.
 
     Returns a `LockedConnection` (duck-typed as `sqlite3.Connection`) that
     serializes access across the FastAPI worker-thread pool.

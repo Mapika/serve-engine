@@ -954,7 +954,7 @@ async def unpin_deployment(
 @router.get("/deployments/current/logs")
 def stream_current_logs(request: Request):
     conn: sqlite3.Connection = request.app.state.conn
-    docker_client = request.app.state.manager._docker  # Plan 02 promotes a public accessor
+    docker_client = request.app.state.manager._docker
     active = dep_store.find_active(conn)
     if active is None or active.container_id is None:
         raise HTTPException(404, "no active deployment with a running container")

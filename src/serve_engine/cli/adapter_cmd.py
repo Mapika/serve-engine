@@ -1,7 +1,4 @@
-"""Register, download, load, and unload LoRA adapters.
-
-See docs/design/specs/2026-05-13-adapter-lifecycle-design.md.
-"""
+"""Register, download, load, and unload LoRA adapters."""
 from __future__ import annotations
 
 import asyncio

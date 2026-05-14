@@ -11,8 +11,6 @@ Three rules over `usage_events`:
 Each rule emits Candidate(base_name, adapter_name, score, reason).
 Predictor.candidates() runs all enabled rules, dedupes by (base, adapter)
 keeping max score, and returns sorted desc.
-
-Design: docs/design/specs/2026-05-13-predictive-layer-design.md section4.
 """
 from __future__ import annotations
 

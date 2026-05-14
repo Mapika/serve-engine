@@ -1,7 +1,5 @@
 """Show predictor candidates, tick stats, or replay a trace.
 
-See docs/design/specs/2026-05-13-predictive-layer-design.md.
-
 Modes:
 - (default)     current top predictor candidates
 - --stats       tick-loop counters

@@ -1,4 +1,4 @@
-# Pinned engine images. Update via `serve update-engines` (Plan 08) or
+# Pinned engine images. Update via `serve update-engines` or
 # `serve config set engine.<name>.image <tag>`.
 
 vllm:

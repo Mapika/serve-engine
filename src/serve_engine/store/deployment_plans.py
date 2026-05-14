@@ -13,8 +13,6 @@ deployments table alone isn't sufficient because:
 - gpu_memory_utilization is computed at placement time and not part of
   what the operator specified - replaying needs the *operator's* intent,
   not the manager's resolved values.
-
-Companion design: docs/design/specs/2026-05-13-predictive-layer-design.md
 """
 from __future__ import annotations
 

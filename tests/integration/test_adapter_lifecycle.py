@@ -1,11 +1,8 @@
-"""End-to-end integration test for the adapter lifecycle (Workstream A).
+"""End-to-end integration test for the adapter lifecycle.
 
 Drives the full HTTP stack (admin endpoints + OpenAI proxy + adapter
 router + lifecycle) against a fake engine that records every adapter
 load/unload + chat-completion call. No real GPU; no real container.
-
-Acceptance: walks the 8-step flow from
-docs/design/plans/2026-05-13-adapter-lifecycle-plan.md Task 11.
 """
 import asyncio
 from unittest.mock import AsyncMock, MagicMock

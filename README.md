@@ -348,7 +348,6 @@ By default, serve-engine owns `~/.serve`. Override it with `SERVE_HOME`.
 ## Performance Snapshot
 
 Single H100 80 GB, Qwen2.5 0.5B and 1.5B, 512-token outputs, Poisson arrivals.
-Raw benchmark JSON lives in `docs/bench/`.
 
 | QPS | Model and Engine | Agg TPS | TTFT p50 ms | E2E p50 ms |
 |---:|---|---:|---:|---:|
@@ -360,16 +359,6 @@ Raw benchmark JSON lives in `docs/bench/`.
 
 Treat these as a sanity check, not a universal benchmark. Engine version, model
 family, context length, quantization, and GPU all matter.
-
-## Design Docs
-
-Current direction:
-
-- `docs/design/specs/2026-05-14-service-router-control-plane.md`
-
-Historical implementation notes live in `docs/design/plans/` and older files
-under `docs/design/specs/`. Older adapter and snapshot notes are retained as
-history. The current direction is service routing and lifecycle control.
 
 ## Development
 
