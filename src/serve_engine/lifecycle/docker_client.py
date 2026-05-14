@@ -92,6 +92,23 @@ class DockerClient:
         if remove:
             c.remove()
 
+    def container_image_id(self, container_id: str) -> str | None:
+        """Return the content-addressable id (`sha256:...`) of the image the
+        container was started from. The docker SDK exposes this on
+        `container.image.id`; it is always populated for pulled or
+        locally-built images. `RepoDigests` is intentionally NOT used:
+        it is empty for locally-built images and unreliable across registry
+        re-pulls. Returns None if the container is gone.
+        """
+        try:
+            c = self._client.containers.get(container_id)
+        except NotFound:
+            return None
+        image = getattr(c, "image", None)
+        if image is None:
+            return None
+        return getattr(image, "id", None)
+
     def container_pids(self, container_id: str) -> list[int]:
         """All host-side PIDs running inside the container, including
         children spawned by the entrypoint (e.g. vLLM EngineCore subprocs).

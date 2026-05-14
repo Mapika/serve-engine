@@ -30,6 +30,7 @@ class Deployment:
     last_request_at: str | None
     max_loras: int = 0  # 0 = LoRA disabled
     max_lora_rank: int = 0  # 0 = unset; treat as engine default (16)
+    image_digest: str | None = None  # docker image content-id (sha256:...)
 
 
 def _row_to_dep(row: sqlite3.Row) -> Deployment:
@@ -45,6 +46,11 @@ def _row_to_dep(row: sqlite3.Row) -> Deployment:
         max_lora_rank_value = row["max_lora_rank"]
     except (KeyError, IndexError):
         max_lora_rank_value = 0
+    # image_digest is on schema migration 012; older DBs may not have it.
+    try:
+        image_digest_value = row["image_digest"]
+    except (KeyError, IndexError):
+        image_digest_value = None
     return Deployment(
         id=row["id"],
         model_id=row["model_id"],
@@ -66,6 +72,7 @@ def _row_to_dep(row: sqlite3.Row) -> Deployment:
         last_request_at=row["last_request_at"],
         max_loras=max_loras_value or 0,
         max_lora_rank=max_lora_rank_value or 0,
+        image_digest=image_digest_value,
     )
 
 
@@ -207,4 +214,17 @@ def set_pinned(conn: sqlite3.Connection, dep_id: int, pinned: bool) -> None:
     conn.execute(
         "UPDATE deployments SET pinned = ? WHERE id = ?",
         (1 if pinned else 0, dep_id),
+    )
+
+
+def set_image_digest(conn: sqlite3.Connection, dep_id: int, digest: str) -> None:
+    """Record the docker image content-id captured at container start.
+
+    The tag in `image_tag` (e.g. `vllm/vllm-openai:v0.20.2`) is a mutable
+    pointer - if upstream retags, reproducibility is lost. The digest is
+    the immutable identifier for what was actually run.
+    """
+    conn.execute(
+        "UPDATE deployments SET image_digest = ? WHERE id = ?",
+        (digest, dep_id),
     )

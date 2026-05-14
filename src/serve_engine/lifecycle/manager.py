@@ -293,6 +293,17 @@ class LifecycleManager:
                 container_port=handle.port,
                 container_address=handle.address,
             )
+            # Capture the docker image's content-addressable id so the row
+            # records what actually ran, not just the tag. Tags are mutable;
+            # if upstream retags `vllm/vllm-openai:vX.Y.Z`, the digest is
+            # the only reproducible reference. Best-effort: a failure to
+            # resolve the id must not block the load.
+            try:
+                image_digest = self._docker.container_image_id(handle.id)
+            except Exception:
+                image_digest = None
+            if isinstance(image_digest, str) and image_digest:
+                dep_store.set_image_digest(self._conn, dep.id, image_digest)
             await self._emit("deployment.spawned", dep_id=dep.id, container_id=handle.id)
 
             health_url = f"http://{handle.address}:{handle.port}{backend.health_path}"
