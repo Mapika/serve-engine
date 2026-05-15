@@ -34,6 +34,16 @@ function fmtGpus(ids: number[] | undefined): string {
   return ids.length === 1 ? `gpu ${ids[0]}` : `gpu ${ids.join(',')}`
 }
 
+function gpuGridCols(count: number): string {
+  // Match the number of columns to the number of GPUs so a single card
+  // doesn't sit alone in column 1 of a 4-col layout, then cap at 4 so the
+  // cards stay readable on dense hosts.
+  if (count <= 1) return 'grid-cols-1'
+  if (count === 2) return 'grid-cols-1 md:grid-cols-2'
+  if (count === 3) return 'grid-cols-1 md:grid-cols-3'
+  return 'grid-cols-1 md:grid-cols-2 lg:grid-cols-4'
+}
+
 function GpuCard({ g }: { g: any }) {
   const pct = (g.memory_used_mb / g.memory_total_mb) * 100
   return (
@@ -99,7 +109,7 @@ export default function Dashboard() {
 
       <section className="space-y-6">
         <div className="label">gpus</div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-12">
+        <div className={'grid gap-12 ' + gpuGridCols((gpus.data ?? []).length)}>
           {(gpus.data ?? []).map((g: any) => <GpuCard key={g.index} g={g} />)}
         </div>
       </section>

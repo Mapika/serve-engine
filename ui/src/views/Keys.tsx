@@ -8,11 +8,14 @@ export default function Keys() {
   const [name, setName] = useState('')
   const [tier, setTier] = useState('standard')
   const [lastSecret, setLastSecret] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [showRevoked, setShowRevoked] = useState(false)
 
   const create = useMutation({
     mutationFn: () => api.createKey({ name, tier }),
     onSuccess: (resp: any) => {
       setLastSecret(resp.secret)
+      setCopied(false)
       setName('')
       qc.invalidateQueries({ queryKey: ['keys'] })
     },
@@ -22,7 +25,23 @@ export default function Keys() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['keys'] }),
   })
 
-  const active = (keys.data ?? []).filter((k: any) => !k.revoked).length
+  async function copySecret() {
+    if (!lastSecret) return
+    try {
+      await navigator.clipboard.writeText(lastSecret)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch {
+      /* clipboard blocked — user can still select manually */
+    }
+  }
+
+  const all = keys.data ?? []
+  const active = all.filter((k: any) => !k.revoked).length
+  const revoked = all.length - active
+  const visible = showRevoked
+    ? all
+    : all.filter((k: any) => !k.revoked)
 
   return (
     <div className="space-y-14">
@@ -59,14 +78,44 @@ export default function Keys() {
         </div>
         {lastSecret && (
           <div className="border border-accent/40 bg-[var(--accent-soft)] px-4 py-3 max-w-3xl">
-            <div className="label text-accent mb-2">save this; it won't be shown again</div>
-            <code className="font-mono text-[13px] break-all">{lastSecret}</code>
+            <div className="flex items-center justify-between mb-2">
+              <div className="label text-accent">save this; it won't be shown again</div>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={copySecret}
+                  className="text-accent text-[11px] tracking-wider hover:opacity-70 transition-opacity"
+                >
+                  {copied ? 'copied ✓' : 'copy'}
+                </button>
+                <button
+                  onClick={() => setLastSecret(null)}
+                  className="text-mute text-[11px] tracking-wider hover:text-dim transition-colors"
+                  aria-label="dismiss"
+                >
+                  dismiss
+                </button>
+              </div>
+            </div>
+            <code className="font-mono text-[13px] break-all select-all">{lastSecret}</code>
           </div>
         )}
       </section>
 
       <section className="space-y-4">
-        <div className="label">issued keys</div>
+        <div className="flex items-center justify-between">
+          <div className="label">issued keys</div>
+          {revoked > 0 && (
+            <label className="text-mute text-[11px] tracking-wider select-none cursor-pointer hover:text-dim transition-colors">
+              <input
+                type="checkbox"
+                className="mr-2 accent-accent align-middle"
+                checked={showRevoked}
+                onChange={e => setShowRevoked(e.target.checked)}
+              />
+              show revoked {!showRevoked && <span className="text-accent">({revoked})</span>}
+            </label>
+          )}
+        </div>
         <table className="ditable">
           <thead>
             <tr>
@@ -79,12 +128,14 @@ export default function Keys() {
             </tr>
           </thead>
           <tbody>
-            {(keys.data ?? []).length === 0 && (
+            {visible.length === 0 && (
               <tr>
-                <td colSpan={6} className="!py-12 text-center text-mute">no keys yet</td>
+                <td colSpan={6} className="!py-12 text-center text-mute">
+                  {all.length === 0 ? 'no keys yet' : 'no active keys'}
+                </td>
               </tr>
             )}
-            {(keys.data ?? []).map((k: any) => (
+            {visible.map((k: any) => (
               <tr key={k.id}>
                 <td className="text-mute tnum">{k.id}</td>
                 <td>{k.name}</td>
@@ -99,10 +150,15 @@ export default function Keys() {
                 <td className="text-right">
                   {!k.revoked && (
                     <button
-                      className="btn-link-danger"
-                      onClick={() => revoke.mutate(k.id)}
+                      className="btn-link-danger disabled:opacity-40"
+                      disabled={revoke.isPending && revoke.variables === k.id}
+                      onClick={() => {
+                        if (confirm(`revoke key "${k.name}" (#${k.id})? this cannot be undone.`)) {
+                          revoke.mutate(k.id)
+                        }
+                      }}
                     >
-                      revoke
+                      {revoke.isPending && revoke.variables === k.id ? 'revoking…' : 'revoke'}
                     </button>
                   )}
                 </td>
