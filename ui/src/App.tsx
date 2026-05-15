@@ -8,11 +8,13 @@ import Predictor from './views/Predictor'
 import Playground from './views/Playground'
 import Keys from './views/Keys'
 import Logs from './views/Logs'
+import Services from './views/Services'
 
 type View =
   | 'dashboard'
   | 'models'
   | 'adapters'
+  | 'services'
   | 'predictor'
   | 'playground'
   | 'keys'
@@ -22,6 +24,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: 'dashboard', label: 'dashboard' },
   { id: 'models', label: 'models' },
   { id: 'adapters', label: 'adapters' },
+  { id: 'services', label: 'services' },
   { id: 'predictor', label: 'predictor' },
   { id: 'playground', label: 'playground' },
   { id: 'keys', label: 'keys' },
@@ -76,6 +79,7 @@ export default function App() {
             {view === 'dashboard' && <Dashboard />}
             {view === 'models' && <Models />}
             {view === 'adapters' && <Adapters />}
+            {view === 'services' && <Services />}
             {view === 'predictor' && <Predictor />}
             {view === 'playground' && <Playground />}
             {view === 'keys' && <Keys />}
