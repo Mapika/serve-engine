@@ -146,6 +146,27 @@ export const api = {
       'GET',
       `/admin/routes/match/dry-run?model=${encodeURIComponent(model)}`,
     ),
+
+  // Per-key usage (timeseries).
+  keyUsage: (keyId: number, windowS = 86400, bucketS = 3600) =>
+    jfetch<KeyUsage>(
+      'GET',
+      `/admin/keys/${keyId}/usage?window_s=${windowS}&bucket_s=${bucketS}`,
+    ),
+}
+
+export type KeyUsageBucket = {
+  bucket_idx: number
+  requests: number
+  tokens_in: number
+  tokens_out: number
+}
+
+export type KeyUsage = {
+  key_id: number
+  window_s: number
+  bucket_s: number
+  buckets: KeyUsageBucket[]
 }
 
 export type RouteDryRun = {

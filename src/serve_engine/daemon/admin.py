@@ -1134,6 +1134,35 @@ def update_key(
     _ak_store.set_allowed_models(conn, key_id, body.allowed_models)
 
 
+@router.get("/keys/{key_id}/usage")
+def key_usage(
+    key_id: int,
+    window_s: int = 86400,
+    bucket_s: int = 3600,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Per-key time-bucketed usage over the past `window_s` seconds. Defaults
+    to a 24h window with 1h buckets. Used by the UI to render per-key
+    request/token sparklines.
+    """
+    from serve_engine.store import api_keys as api_key_store
+    from serve_engine.store import key_usage as key_usage_store
+    if api_key_store.get_by_id(conn, key_id) is None:
+        raise HTTPException(404, f"api key {key_id} not found")
+    if window_s <= 0 or bucket_s <= 0:
+        raise HTTPException(400, "window_s and bucket_s must be positive")
+    if window_s // bucket_s > 1024:
+        raise HTTPException(400, "too many buckets requested (cap is 1024)")
+    return {
+        "key_id": key_id,
+        "window_s": window_s,
+        "bucket_s": bucket_s,
+        "buckets": key_usage_store.bucketed_usage(
+            conn, key_id=key_id, window_s=window_s, bucket_s=bucket_s,
+        ),
+    }
+
+
 @router.delete("/keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_key(
     key_id: int,
