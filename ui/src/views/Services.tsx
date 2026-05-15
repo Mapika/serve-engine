@@ -9,44 +9,7 @@ export default function Services() {
   const models = useQuery({ queryKey: ['models'], queryFn: api.listModels })
   const backends = useQuery({ queryKey: ['backends'], queryFn: api.listBackends })
 
-  const [routeForm, setRouteForm] = useState({
-    name: '',
-    match_model: '',
-    profile_name: '',
-    fallback_profile_name: '',
-    priority: '100',
-  })
-  const [routeError, setRouteError] = useState('')
-
-  const createRoute = useMutation({
-    mutationFn: () => {
-      const priority = Number(routeForm.priority)
-      if (!Number.isInteger(priority)) throw new Error('priority must be an integer')
-      return api.createRoute({
-        name: routeForm.name.trim(),
-        match_model: routeForm.match_model.trim(),
-        profile_name: routeForm.profile_name,
-        fallback_profile_name: routeForm.fallback_profile_name || null,
-        priority,
-      })
-    },
-    onMutate: () => setRouteError(''),
-    onError: (e: Error) => setRouteError(e.message),
-    onSuccess: () => {
-      setRouteForm({
-        name: '', match_model: '', profile_name: '',
-        fallback_profile_name: '', priority: '100',
-      })
-      qc.invalidateQueries({ queryKey: ['routes'] })
-    },
-  })
-
-  const deleteRoute = useMutation({
-    mutationFn: (name: string) => api.deleteRoute(name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['routes'] }),
-  })
-
-  const [profileActionError, setProfileActionError] = useState('')
+  const hasProfiles = (profiles.data ?? []).length > 0
 
   const [profileForm, setProfileForm] = useState({
     name: '',
@@ -58,6 +21,7 @@ export default function Services() {
     pinned: false,
   })
   const [profileFormError, setProfileFormError] = useState('')
+  const [profileActionError, setProfileActionError] = useState('')
 
   const createProfile = useMutation({
     mutationFn: () => {
@@ -110,6 +74,43 @@ export default function Services() {
     },
   })
 
+  const [routeForm, setRouteForm] = useState({
+    name: '',
+    match_model: '',
+    profile_name: '',
+    fallback_profile_name: '',
+    priority: '100',
+  })
+  const [routeError, setRouteError] = useState('')
+
+  const createRoute = useMutation({
+    mutationFn: () => {
+      const priority = Number(routeForm.priority)
+      if (!Number.isInteger(priority)) throw new Error('priority must be an integer')
+      return api.createRoute({
+        name: routeForm.name.trim(),
+        match_model: routeForm.match_model.trim(),
+        profile_name: routeForm.profile_name,
+        fallback_profile_name: routeForm.fallback_profile_name || null,
+        priority,
+      })
+    },
+    onMutate: () => setRouteError(''),
+    onError: (e: Error) => setRouteError(e.message),
+    onSuccess: () => {
+      setRouteForm({
+        name: '', match_model: '', profile_name: '',
+        fallback_profile_name: '', priority: '100',
+      })
+      qc.invalidateQueries({ queryKey: ['routes'] })
+    },
+  })
+
+  const deleteRoute = useMutation({
+    mutationFn: (name: string) => api.deleteRoute(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['routes'] }),
+  })
+
   return (
     <div className="space-y-14">
       <header className="flex items-baseline justify-between">
@@ -120,150 +121,19 @@ export default function Services() {
       </header>
 
       <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="label">routes</div>
+        <div className="flex items-baseline justify-between">
+          <div className="label">profiles</div>
           <div className="text-mute text-[11px] tracking-wider">
-            lower priority wins
+            reusable launch definition
           </div>
         </div>
-
-        <div className="bg-elev/40 border border-rule p-5 space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <div className="space-y-1">
-              <div className="label">name</div>
-              <input
-                className="field font-mono w-full text-[12px]"
-                placeholder="chat-default"
-                value={routeForm.name}
-                onChange={e => setRouteForm(f => ({ ...f, name: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <div className="label">match model</div>
-              <input
-                className="field font-mono w-full text-[12px]"
-                placeholder="chat"
-                value={routeForm.match_model}
-                onChange={e => setRouteForm(f => ({ ...f, match_model: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <div className="label">profile</div>
-              <select
-                className="field font-mono w-full text-[12px]"
-                value={routeForm.profile_name}
-                onChange={e => setRouteForm(f => ({ ...f, profile_name: e.target.value }))}
-              >
-                <option value="">choose…</option>
-                {(profiles.data ?? []).map(p => (
-                  <option key={p.id} value={p.name}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <div className="label">fallback (optional)</div>
-              <select
-                className="field font-mono w-full text-[12px]"
-                value={routeForm.fallback_profile_name}
-                onChange={e => setRouteForm(f => ({ ...f, fallback_profile_name: e.target.value }))}
-              >
-                <option value="">none</option>
-                {(profiles.data ?? [])
-                  .filter(p => p.name !== routeForm.profile_name)
-                  .map(p => (
-                    <option key={p.id} value={p.name}>{p.name}</option>
-                  ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <div className="label">priority</div>
-              <input
-                className="field font-mono w-full text-[12px] tnum"
-                value={routeForm.priority}
-                onChange={e => setRouteForm(f => ({ ...f, priority: e.target.value }))}
-              />
-            </div>
-          </div>
-          {routeError && (
-            <div className="text-err text-[11px] tracking-wider">{routeError}</div>
-          )}
-          <div className="flex items-center gap-3">
-            <button
-              className="btn-primary"
-              disabled={
-                !routeForm.name.trim() ||
-                !routeForm.match_model.trim() ||
-                !routeForm.profile_name ||
-                createRoute.isPending
-              }
-              onClick={() => createRoute.mutate()}
-            >
-              {createRoute.isPending ? 'creating…' : 'create route'}
-            </button>
-            <span className="label">public model name → profile mapping</span>
-          </div>
-        </div>
-
-        <table className="ditable">
-          <thead>
-            <tr>
-              <th className="w-12">pri</th>
-              <th>name</th>
-              <th>match model</th>
-              <th>profile</th>
-              <th>fallback</th>
-              <th>enabled</th>
-              <th className="text-right">actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(routes.data ?? []).length === 0 && (
-              <tr>
-                <td colSpan={7} className="!py-12 text-center text-mute">
-                  no routes. create one above to expose a public model name.
-                </td>
-              </tr>
-            )}
-            {(routes.data ?? [])
-              .slice()
-              .sort((a, b) => a.priority - b.priority)
-              .map(r => (
-                <tr key={r.id}>
-                  <td className="text-mute tnum">{r.priority}</td>
-                  <td>{r.name}</td>
-                  <td className="font-mono text-[12px]">{r.match_model}</td>
-                  <td className="text-dim">{r.profile_name}</td>
-                  <td className="text-mute">{r.fallback_profile_name ?? '—'}</td>
-                  <td>
-                    <span className={`dot ${r.enabled ? 'dot-ready' : 'dot-stopped'}`} />
-                    <span className="text-dim">{r.enabled ? 'on' : 'off'}</span>
-                  </td>
-                  <td className="text-right">
-                    <button
-                      className="btn-link-danger disabled:opacity-40"
-                      disabled={deleteRoute.isPending}
-                      onClick={() => {
-                        if (confirm(`delete route ${r.name}?`)) deleteRoute.mutate(r.name)
-                      }}
-                    >
-                      delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-      </section>
-
-      <section className="space-y-4">
-        <div className="label">profiles</div>
         {profileActionError && (
           <div className="text-err text-[11px] tracking-wider">{profileActionError}</div>
         )}
 
         <div className="bg-elev/40 border border-rule p-5 space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="space-y-1">
+          <div className="grid grid-cols-12 gap-3">
+            <div className="space-y-1 col-span-12 md:col-span-3">
               <div className="label">profile name</div>
               <input
                 className="field font-mono w-full text-[12px]"
@@ -272,7 +142,7 @@ export default function Services() {
                 onChange={e => setProfileForm(f => ({ ...f, name: e.target.value }))}
               />
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 col-span-12 md:col-span-3">
               <div className="label">model name</div>
               <input
                 className="field font-mono w-full text-[12px]"
@@ -295,7 +165,7 @@ export default function Services() {
                 ))}
               </datalist>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 col-span-12 md:col-span-6">
               <div className="label">hf repo</div>
               <input
                 className="field font-mono w-full text-[12px]"
@@ -304,7 +174,7 @@ export default function Services() {
                 onChange={e => setProfileForm(f => ({ ...f, hf_repo: e.target.value }))}
               />
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 col-span-6 md:col-span-3">
               <div className="label">backend</div>
               <select
                 className="field font-mono w-full text-[12px]"
@@ -317,7 +187,7 @@ export default function Services() {
                 ))}
               </select>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 col-span-6 md:col-span-3">
               <div className="label">gpu ids</div>
               <input
                 className="field font-mono w-full text-[12px] tnum"
@@ -326,7 +196,7 @@ export default function Services() {
                 onChange={e => setProfileForm(f => ({ ...f, gpu_ids: e.target.value }))}
               />
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 col-span-6 md:col-span-3">
               <div className="label">max model len</div>
               <input
                 className="field font-mono w-full text-[12px] tnum"
@@ -334,15 +204,16 @@ export default function Services() {
                 onChange={e => setProfileForm(f => ({ ...f, max_model_len: e.target.value }))}
               />
             </div>
-            <div className="md:col-span-2 flex items-end">
-              <label className="text-[12px] text-dim flex items-center gap-2 select-none cursor-pointer">
+            <div className="space-y-1 col-span-6 md:col-span-3 flex flex-col">
+              <div className="label">options</div>
+              <label className="text-[12px] text-dim flex items-center gap-2 select-none cursor-pointer pt-2">
                 <input
                   type="checkbox"
                   className="accent-accent"
                   checked={profileForm.pinned}
                   onChange={e => setProfileForm(f => ({ ...f, pinned: e.target.checked }))}
                 />
-                pinned (idle reaper skips it)
+                pinned (skip idle reaper)
               </label>
             </div>
           </div>
@@ -362,7 +233,6 @@ export default function Services() {
             >
               {createProfile.isPending ? 'creating…' : 'create profile'}
             </button>
-            <span className="label">reusable launch definition</span>
           </div>
         </div>
 
@@ -382,7 +252,7 @@ export default function Services() {
             {(profiles.data ?? []).length === 0 && (
               <tr>
                 <td colSpan={7} className="!py-12 text-center text-mute">
-                  no profiles. create one with the form below.
+                  no profiles yet. create one above to define how a model is launched.
                 </td>
               </tr>
             )}
@@ -422,6 +292,152 @@ export default function Services() {
                 </tr>
               )
             })}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-baseline justify-between">
+          <div className="label">routes</div>
+          <div className="text-mute text-[11px] tracking-wider">
+            public model name → profile · lower priority wins
+          </div>
+        </div>
+
+        {!hasProfiles ? (
+          <div className="border border-rule bg-elev/40 px-5 py-12 text-center text-mute text-[12px]">
+            create a profile above first — routes point at profiles.
+          </div>
+        ) : (
+          <div className="bg-elev/40 border border-rule p-5 space-y-4">
+            <div className="grid grid-cols-12 gap-3">
+              <div className="space-y-1 col-span-6 md:col-span-2">
+                <div className="label">name</div>
+                <input
+                  className="field font-mono w-full text-[12px]"
+                  placeholder="chat-default"
+                  value={routeForm.name}
+                  onChange={e => setRouteForm(f => ({ ...f, name: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1 col-span-6 md:col-span-3">
+                <div className="label">profile</div>
+                <select
+                  className="field font-mono w-full text-[12px]"
+                  value={routeForm.profile_name}
+                  onChange={e => setRouteForm(f => ({ ...f, profile_name: e.target.value }))}
+                >
+                  <option value="">choose…</option>
+                  {(profiles.data ?? []).map(p => (
+                    <option key={p.id} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1 col-span-6 md:col-span-3">
+                <div className="label">fallback (optional)</div>
+                <select
+                  className="field font-mono w-full text-[12px]"
+                  value={routeForm.fallback_profile_name}
+                  onChange={e => setRouteForm(f => ({ ...f, fallback_profile_name: e.target.value }))}
+                >
+                  <option value="">none</option>
+                  {(profiles.data ?? [])
+                    .filter(p => p.name !== routeForm.profile_name)
+                    .map(p => (
+                      <option key={p.id} value={p.name}>{p.name}</option>
+                    ))}
+                </select>
+              </div>
+              <div className="space-y-1 col-span-6 md:col-span-3">
+                <div className="label">match model (exact)</div>
+                <input
+                  className="field font-mono w-full text-[12px]"
+                  placeholder="chat"
+                  value={routeForm.match_model}
+                  onChange={e => setRouteForm(f => ({ ...f, match_model: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1 col-span-12 md:col-span-1">
+                <div className="label">pri</div>
+                <input
+                  className="field font-mono w-full text-[12px] tnum text-right"
+                  value={routeForm.priority}
+                  onChange={e => setRouteForm(f => ({ ...f, priority: e.target.value }))}
+                />
+              </div>
+            </div>
+            {routeError && (
+              <div className="text-err text-[11px] tracking-wider">{routeError}</div>
+            )}
+            <div className="flex items-center gap-3">
+              <button
+                className="btn-primary"
+                disabled={
+                  !routeForm.name.trim() ||
+                  !routeForm.match_model.trim() ||
+                  !routeForm.profile_name ||
+                  createRoute.isPending
+                }
+                onClick={() => createRoute.mutate()}
+              >
+                {createRoute.isPending ? 'creating…' : 'create route'}
+              </button>
+              <span className="label">
+                callable as <span className="text-dim">model: {routeForm.match_model || '<name>'}</span>
+              </span>
+            </div>
+          </div>
+        )}
+
+        <table className="ditable">
+          <thead>
+            <tr>
+              <th className="w-12">pri</th>
+              <th>name</th>
+              <th>match model</th>
+              <th>profile</th>
+              <th>fallback</th>
+              <th>enabled</th>
+              <th className="text-right">actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(routes.data ?? []).length === 0 && (
+              <tr>
+                <td colSpan={7} className="!py-12 text-center text-mute">
+                  {hasProfiles
+                    ? 'no routes. create one above to expose a public model name.'
+                    : 'no routes — and no profiles to route at yet.'}
+                </td>
+              </tr>
+            )}
+            {(routes.data ?? [])
+              .slice()
+              .sort((a, b) => a.priority - b.priority)
+              .map(r => (
+                <tr key={r.id}>
+                  <td className="text-mute tnum">{r.priority}</td>
+                  <td>{r.name}</td>
+                  <td className="font-mono text-[12px]">{r.match_model}</td>
+                  <td className="text-dim">{r.profile_name}</td>
+                  <td className="text-mute">{r.fallback_profile_name ?? '—'}</td>
+                  <td>
+                    <span className={`dot ${r.enabled ? 'dot-ready' : 'dot-stopped'}`} />
+                    <span className="text-dim">{r.enabled ? 'on' : 'off'}</span>
+                  </td>
+                  <td className="text-right">
+                    <button
+                      className="btn-link-danger disabled:opacity-40"
+                      disabled={deleteRoute.isPending}
+                      onClick={() => {
+                        if (confirm(`delete route ${r.name}?`)) deleteRoute.mutate(r.name)
+                      }}
+                    >
+                      delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </section>
