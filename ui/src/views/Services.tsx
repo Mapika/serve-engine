@@ -6,6 +6,8 @@ export default function Services() {
   const qc = useQueryClient()
   const profiles = useQuery({ queryKey: ['profiles'], queryFn: api.listProfiles })
   const routes = useQuery({ queryKey: ['routes'], queryFn: api.listRoutes })
+  const models = useQuery({ queryKey: ['models'], queryFn: api.listModels })
+  const backends = useQuery({ queryKey: ['backends'], queryFn: api.listBackends })
 
   const [routeForm, setRouteForm] = useState({
     name: '',
@@ -45,6 +47,51 @@ export default function Services() {
   })
 
   const [profileActionError, setProfileActionError] = useState('')
+
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    model_name: '',
+    hf_repo: '',
+    backend: '',
+    gpu_ids: '0',
+    max_model_len: '8192',
+    pinned: false,
+  })
+  const [profileFormError, setProfileFormError] = useState('')
+
+  const createProfile = useMutation({
+    mutationFn: () => {
+      const gpu_ids = profileForm.gpu_ids
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(Number)
+        .filter(n => Number.isInteger(n) && n >= 0)
+      if (gpu_ids.length === 0) throw new Error('gpu_ids: at least one integer required')
+      const max_model_len = Number(profileForm.max_model_len)
+      if (!Number.isInteger(max_model_len) || max_model_len < 128) {
+        throw new Error('max_model_len: integer >= 128')
+      }
+      return api.createProfile({
+        name: profileForm.name.trim(),
+        model_name: profileForm.model_name.trim(),
+        hf_repo: profileForm.hf_repo.trim(),
+        backend: profileForm.backend || undefined,
+        gpu_ids,
+        max_model_len,
+        pinned: profileForm.pinned,
+      })
+    },
+    onMutate: () => setProfileFormError(''),
+    onError: (e: Error) => setProfileFormError(e.message),
+    onSuccess: () => {
+      setProfileForm({
+        name: '', model_name: '', hf_repo: '', backend: '',
+        gpu_ids: '0', max_model_len: '8192', pinned: false,
+      })
+      qc.invalidateQueries({ queryKey: ['profiles'] })
+    },
+  })
 
   const deployProfile = useMutation({
     mutationFn: (name: string) => api.deployProfile(name),
@@ -213,6 +260,112 @@ export default function Services() {
         {profileActionError && (
           <div className="text-err text-[11px] tracking-wider">{profileActionError}</div>
         )}
+
+        <div className="bg-elev/40 border border-rule p-5 space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="space-y-1">
+              <div className="label">profile name</div>
+              <input
+                className="field font-mono w-full text-[12px]"
+                placeholder="qwen-vllm"
+                value={profileForm.name}
+                onChange={e => setProfileForm(f => ({ ...f, name: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="label">model name</div>
+              <input
+                className="field font-mono w-full text-[12px]"
+                list="profile-model-list"
+                placeholder="qwen"
+                value={profileForm.model_name}
+                onChange={e => {
+                  const next = e.target.value
+                  const m = (models.data ?? []).find((m: any) => m.name === next)
+                  setProfileForm(f => ({
+                    ...f,
+                    model_name: next,
+                    hf_repo: m ? m.hf_repo : f.hf_repo,
+                  }))
+                }}
+              />
+              <datalist id="profile-model-list">
+                {(models.data ?? []).map((m: any) => (
+                  <option key={m.id} value={m.name} />
+                ))}
+              </datalist>
+            </div>
+            <div className="space-y-1">
+              <div className="label">hf repo</div>
+              <input
+                className="field font-mono w-full text-[12px]"
+                placeholder="Qwen/Qwen2.5-0.5B-Instruct"
+                value={profileForm.hf_repo}
+                onChange={e => setProfileForm(f => ({ ...f, hf_repo: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="label">backend</div>
+              <select
+                className="field font-mono w-full text-[12px]"
+                value={profileForm.backend}
+                onChange={e => setProfileForm(f => ({ ...f, backend: e.target.value }))}
+              >
+                <option value="">auto</option>
+                {(backends.data ?? []).map(b => (
+                  <option key={b.name} value={b.name}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <div className="label">gpu ids</div>
+              <input
+                className="field font-mono w-full text-[12px] tnum"
+                placeholder="0 or 0,1"
+                value={profileForm.gpu_ids}
+                onChange={e => setProfileForm(f => ({ ...f, gpu_ids: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="label">max model len</div>
+              <input
+                className="field font-mono w-full text-[12px] tnum"
+                value={profileForm.max_model_len}
+                onChange={e => setProfileForm(f => ({ ...f, max_model_len: e.target.value }))}
+              />
+            </div>
+            <div className="md:col-span-2 flex items-end">
+              <label className="text-[12px] text-dim flex items-center gap-2 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="accent-accent"
+                  checked={profileForm.pinned}
+                  onChange={e => setProfileForm(f => ({ ...f, pinned: e.target.checked }))}
+                />
+                pinned (idle reaper skips it)
+              </label>
+            </div>
+          </div>
+          {profileFormError && (
+            <div className="text-err text-[11px] tracking-wider">{profileFormError}</div>
+          )}
+          <div className="flex items-center gap-3">
+            <button
+              className="btn-primary"
+              disabled={
+                !profileForm.name.trim() ||
+                !profileForm.model_name.trim() ||
+                !profileForm.hf_repo.trim() ||
+                createProfile.isPending
+              }
+              onClick={() => createProfile.mutate()}
+            >
+              {createProfile.isPending ? 'creating…' : 'create profile'}
+            </button>
+            <span className="label">reusable launch definition</span>
+          </div>
+        </div>
+
         <table className="ditable">
           <thead>
             <tr>
