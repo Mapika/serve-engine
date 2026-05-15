@@ -1,9 +1,48 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api'
 
 export default function Services() {
+  const qc = useQueryClient()
   const profiles = useQuery({ queryKey: ['profiles'], queryFn: api.listProfiles })
   const routes = useQuery({ queryKey: ['routes'], queryFn: api.listRoutes })
+
+  const [routeForm, setRouteForm] = useState({
+    name: '',
+    match_model: '',
+    profile_name: '',
+    fallback_profile_name: '',
+    priority: '100',
+  })
+  const [routeError, setRouteError] = useState('')
+
+  const createRoute = useMutation({
+    mutationFn: () => {
+      const priority = Number(routeForm.priority)
+      if (!Number.isInteger(priority)) throw new Error('priority must be an integer')
+      return api.createRoute({
+        name: routeForm.name.trim(),
+        match_model: routeForm.match_model.trim(),
+        profile_name: routeForm.profile_name,
+        fallback_profile_name: routeForm.fallback_profile_name || null,
+        priority,
+      })
+    },
+    onMutate: () => setRouteError(''),
+    onError: (e: Error) => setRouteError(e.message),
+    onSuccess: () => {
+      setRouteForm({
+        name: '', match_model: '', profile_name: '',
+        fallback_profile_name: '', priority: '100',
+      })
+      qc.invalidateQueries({ queryKey: ['routes'] })
+    },
+  })
+
+  const deleteRoute = useMutation({
+    mutationFn: (name: string) => api.deleteRoute(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['routes'] }),
+  })
 
   return (
     <div className="space-y-14">
@@ -21,6 +60,84 @@ export default function Services() {
             lower priority wins
           </div>
         </div>
+
+        <div className="bg-elev/40 border border-rule p-5 space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="space-y-1">
+              <div className="label">name</div>
+              <input
+                className="field font-mono w-full text-[12px]"
+                placeholder="chat-default"
+                value={routeForm.name}
+                onChange={e => setRouteForm(f => ({ ...f, name: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="label">match model</div>
+              <input
+                className="field font-mono w-full text-[12px]"
+                placeholder="chat"
+                value={routeForm.match_model}
+                onChange={e => setRouteForm(f => ({ ...f, match_model: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="label">profile</div>
+              <select
+                className="field font-mono w-full text-[12px]"
+                value={routeForm.profile_name}
+                onChange={e => setRouteForm(f => ({ ...f, profile_name: e.target.value }))}
+              >
+                <option value="">choose…</option>
+                {(profiles.data ?? []).map(p => (
+                  <option key={p.id} value={p.name}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <div className="label">fallback (optional)</div>
+              <select
+                className="field font-mono w-full text-[12px]"
+                value={routeForm.fallback_profile_name}
+                onChange={e => setRouteForm(f => ({ ...f, fallback_profile_name: e.target.value }))}
+              >
+                <option value="">none</option>
+                {(profiles.data ?? [])
+                  .filter(p => p.name !== routeForm.profile_name)
+                  .map(p => (
+                    <option key={p.id} value={p.name}>{p.name}</option>
+                  ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <div className="label">priority</div>
+              <input
+                className="field font-mono w-full text-[12px] tnum"
+                value={routeForm.priority}
+                onChange={e => setRouteForm(f => ({ ...f, priority: e.target.value }))}
+              />
+            </div>
+          </div>
+          {routeError && (
+            <div className="text-err text-[11px] tracking-wider">{routeError}</div>
+          )}
+          <div className="flex items-center gap-3">
+            <button
+              className="btn-primary"
+              disabled={
+                !routeForm.name.trim() ||
+                !routeForm.match_model.trim() ||
+                !routeForm.profile_name ||
+                createRoute.isPending
+              }
+              onClick={() => createRoute.mutate()}
+            >
+              {createRoute.isPending ? 'creating…' : 'create route'}
+            </button>
+            <span className="label">public model name → profile mapping</span>
+          </div>
+        </div>
+
         <table className="ditable">
           <thead>
             <tr>
@@ -37,7 +154,7 @@ export default function Services() {
             {(routes.data ?? []).length === 0 && (
               <tr>
                 <td colSpan={7} className="!py-12 text-center text-mute">
-                  no routes. create one below to expose a public model name.
+                  no routes. create one above to expose a public model name.
                 </td>
               </tr>
             )}
@@ -56,7 +173,15 @@ export default function Services() {
                     <span className="text-dim">{r.enabled ? 'on' : 'off'}</span>
                   </td>
                   <td className="text-right">
-                    <span className="text-mute">—</span>
+                    <button
+                      className="btn-link-danger disabled:opacity-40"
+                      disabled={deleteRoute.isPending}
+                      onClick={() => {
+                        if (confirm(`delete route ${r.name}?`)) deleteRoute.mutate(r.name)
+                      }}
+                    >
+                      delete
+                    </button>
                   </td>
                 </tr>
               ))}
