@@ -20,7 +20,6 @@ function VramCell({ used, reserved, status }: { used: number | null; reserved: n
       </div>
     )
   }
-  // Show the reservation while live measurement is unavailable.
   return (
     <div className="flex flex-col items-end leading-tight">
       <span className="text-dim">{fmtMb(reserved)}</span>
@@ -35,17 +34,63 @@ function fmtGpus(ids: number[] | undefined): string {
 }
 
 function gpuGridCols(count: number): string {
-  // Match the number of columns to the number of GPUs so a single card
-  // doesn't sit alone in column 1 of a 4-col layout, then cap at 4 so the
-  // cards stay readable on dense hosts.
   if (count <= 1) return 'grid-cols-1'
   if (count === 2) return 'grid-cols-1 md:grid-cols-2'
   if (count === 3) return 'grid-cols-1 md:grid-cols-3'
   return 'grid-cols-1 md:grid-cols-2 lg:grid-cols-4'
 }
 
-function GpuCard({ g }: { g: any }) {
+function idleCountdown(d: any): string | null {
+  if (d.pinned) return null
+  if (!d.idle_timeout_s || !d.last_request_at) return null
+  // sqlite CURRENT_TIMESTAMP is naive UTC ("YYYY-MM-DD HH:MM:SS"); coerce to ISO
+  // with explicit Z so Date.parse doesn't treat it as local time.
+  const iso = String(d.last_request_at).replace(' ', 'T') + 'Z'
+  const last = Date.parse(iso)
+  if (Number.isNaN(last)) return null
+  const remaining = d.idle_timeout_s - (Date.now() - last) / 1000
+  if (remaining <= 0) return 'evicting'
+  if (remaining < 60) return `${Math.round(remaining)}s`
+  return `${Math.round(remaining / 60)}m`
+}
+
+function DeploymentChip({ d, modelName }: { d: any; modelName: string }) {
+  const idle = idleCountdown(d)
+  const vram = d.vram_used_mb && d.vram_used_mb > 0 ? d.vram_used_mb : d.vram_reserved_mb
+  return (
+    <div
+      className="flex items-center gap-3 text-[12px] py-1.5"
+      title={d.last_error || `deployment #${d.id} on ${d.backend}`}
+    >
+      <span className={`dot dot-${d.status}`} />
+      <span className="text-ink truncate flex-1 min-w-0">{modelName}</span>
+      <span className="text-mute text-[10px] tracking-wider hidden lg:inline">{d.backend}</span>
+      <span className="text-dim tnum">{fmtMb(vram)}</span>
+      {d.pinned ? (
+        <span className="text-accent text-[10px] tracking-wider">pin</span>
+      ) : idle ? (
+        <span className="text-mute text-[10px] tracking-wider" title="idle countdown">
+          {idle}
+        </span>
+      ) : (
+        <span className="text-mute text-[10px]">—</span>
+      )}
+    </div>
+  )
+}
+
+function GpuCard({
+  g, deployments, models,
+}: {
+  g: any
+  deployments: any[]
+  models: any[]
+}) {
   const pct = (g.memory_used_mb / g.memory_total_mb) * 100
+  const onCard = deployments.filter((d: any) =>
+    (d.gpu_ids ?? []).includes(g.index) &&
+    (d.status === 'ready' || d.status === 'loading'),
+  )
   return (
     <div className="space-y-4">
       <div className="flex items-baseline justify-between">
@@ -67,7 +112,22 @@ function GpuCard({ g }: { g: any }) {
       <div className="flex items-center gap-6 text-mute text-[11px] tnum">
         <span>util {g.gpu_util_pct}%</span>
         <span>{g.power_w} w</span>
+        <span className="ml-auto">
+          {onCard.length === 0
+            ? <span className="text-mute">idle</span>
+            : <span className="text-dim">{onCard.length} loaded</span>}
+        </span>
       </div>
+      {onCard.length > 0 && (
+        <div className="pt-2 border-t border-rule-soft space-y-0.5">
+          {onCard.map((d: any) => {
+            const m = (models ?? []).find((m: any) => m.id === d.model_id)
+            return (
+              <DeploymentChip key={d.id} d={d} modelName={m?.name ?? `#${d.id}`} />
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -110,7 +170,14 @@ export default function Dashboard() {
       <section className="space-y-6">
         <div className="label">gpus</div>
         <div className={'grid gap-12 ' + gpuGridCols((gpus.data ?? []).length)}>
-          {(gpus.data ?? []).map((g: any) => <GpuCard key={g.index} g={g} />)}
+          {(gpus.data ?? []).map((g: any) => (
+            <GpuCard
+              key={g.index}
+              g={g}
+              deployments={all}
+              models={models.data ?? []}
+            />
+          ))}
         </div>
       </section>
 
