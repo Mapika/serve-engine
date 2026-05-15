@@ -429,6 +429,47 @@ def delete_service_route(
     route_store.delete(conn, route.id)
 
 
+@router.get("/routes/match/dry-run")
+def match_route_dry_run(
+    model: str,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Replay the proxy's route resolution for `model` without invoking any
+    engine. Returns the matched route (if any), every candidate route that
+    would have matched (so a user can see which disabled or lower-priority
+    route got skipped), and whether the primary/fallback target has a ready
+    deployment right now.
+    """
+    from serve_engine.store import models as model_store
+    matched = route_store.find_enabled_for_model(conn, model)
+    candidates = [
+        asdict(r) for r in route_store.list_all(conn) if r.match_model == model
+    ]
+
+    def ready_for(model_name: str | None) -> bool | None:
+        if not model_name:
+            return None
+        m = model_store.get_by_name(conn, model_name)
+        if m is None:
+            return False
+        for d in dep_store.list_all(conn):
+            if d.model_id == m.id and d.status == "ready":
+                return True
+        return False
+
+    primary_target = matched.target_model_name if matched else None
+    fallback_target = matched.fallback_model_name if matched else None
+    return {
+        "requested": model,
+        "matched": asdict(matched) if matched else None,
+        "candidates": candidates,
+        "primary_target": primary_target,
+        "primary_ready": ready_for(primary_target),
+        "fallback_target": fallback_target,
+        "fallback_ready": ready_for(fallback_target),
+    }
+
+
 @router.delete("/deployments/{dep_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def stop_deployment(
     dep_id: int,

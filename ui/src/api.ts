@@ -43,8 +43,12 @@ export type ServiceRoute = {
   id: number
   name: string
   match_model: string
+  profile_id: number
   profile_name: string
+  target_model_name: string
+  fallback_profile_id: number | null
   fallback_profile_name: string | null
+  fallback_model_name: string | null
   enabled: boolean
   priority: number
 }
@@ -137,4 +141,19 @@ export const api = {
   createRoute: (b: CreateRouteBody) => jfetch<ServiceRoute>('POST', '/admin/routes', b),
   deleteRoute: (name: string) =>
     jfetch<void>('DELETE', `/admin/routes/${encodeURIComponent(name)}`),
+  dryRunRoute: (model: string) =>
+    jfetch<RouteDryRun>(
+      'GET',
+      `/admin/routes/match/dry-run?model=${encodeURIComponent(model)}`,
+    ),
+}
+
+export type RouteDryRun = {
+  requested: string
+  matched: ServiceRoute | null
+  candidates: ServiceRoute[]
+  primary_target: string | null
+  primary_ready: boolean | null
+  fallback_target: string | null
+  fallback_ready: boolean | null
 }

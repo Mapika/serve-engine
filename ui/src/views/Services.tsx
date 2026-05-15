@@ -1,6 +1,78 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '../api'
+import { api, type RouteDryRun } from '../api'
+
+function readyBadge(ready: boolean | null) {
+  if (ready === null) return <span className="text-mute">—</span>
+  if (ready) return (
+    <span><span className="dot dot-ready" /><span className="text-ok">ready</span></span>
+  )
+  return (
+    <span><span className="dot dot-failed" /><span className="text-err">not ready</span></span>
+  )
+}
+
+function DryRunResult({ result }: { result: RouteDryRun }) {
+  if (!result.matched) {
+    return (
+      <div className="text-[12px] space-y-2">
+        <div className="text-err">
+          no enabled route matches <span className="font-mono">{result.requested}</span>
+        </div>
+        {result.candidates.length > 0 && (
+          <div className="text-mute text-[11px] tracking-wider">
+            {result.candidates.length} disabled candidate{result.candidates.length === 1 ? '' : 's'} share this match_model:{' '}
+            {result.candidates.map(c => c.name).join(', ')}
+          </div>
+        )}
+        <div className="text-mute text-[11px] tracking-wider">
+          the proxy will fall back to treating <span className="font-mono">{result.requested}</span> as a direct model name.
+        </div>
+      </div>
+    )
+  }
+  const m = result.matched
+  return (
+    <div className="text-[12px] grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2">
+      <div>
+        <span className="text-mute">matched route </span>
+        <span className="text-ink">{m.name}</span>
+        <span className="text-mute"> (priority {m.priority})</span>
+      </div>
+      <div>
+        <span className="text-mute">primary profile </span>
+        <span className="text-dim">{m.profile_name}</span>
+        <span className="text-mute"> → </span>
+        <span className="font-mono">{m.target_model_name}</span>
+        <span className="ml-3">{readyBadge(result.primary_ready)}</span>
+      </div>
+      <div className="md:col-start-2">
+        <span className="text-mute">fallback </span>
+        {m.fallback_profile_name ? (
+          <>
+            <span className="text-dim">{m.fallback_profile_name}</span>
+            <span className="text-mute"> → </span>
+            <span className="font-mono">{m.fallback_model_name}</span>
+            <span className="ml-3">{readyBadge(result.fallback_ready)}</span>
+          </>
+        ) : (
+          <span className="text-mute">—</span>
+        )}
+      </div>
+      {result.candidates.length > 1 && (
+        <div className="md:col-span-2 text-mute text-[11px] tracking-wider pt-1">
+          {result.candidates.length - 1} other route{result.candidates.length - 1 === 1 ? '' : 's'} share this match_model (lower priority or disabled):{' '}
+          {result.candidates.filter(c => c.id !== m.id).map(c => c.name).join(', ')}
+        </div>
+      )}
+      {result.primary_ready === false && result.fallback_ready !== true && (
+        <div className="md:col-span-2 text-err text-[11px] tracking-wider pt-1">
+          neither primary nor fallback has a ready deployment — a request would 503.
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function Services() {
   const qc = useQueryClient()
@@ -109,6 +181,14 @@ export default function Services() {
   const deleteRoute = useMutation({
     mutationFn: (name: string) => api.deleteRoute(name),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['routes'] }),
+  })
+
+  const [dryRunModel, setDryRunModel] = useState('')
+  const [dryRunResult, setDryRunResult] = useState<RouteDryRun | null>(null)
+  const dryRun = useMutation({
+    mutationFn: (model: string) => api.dryRunRoute(model),
+    onSuccess: (data) => setDryRunResult(data),
+    onError: () => setDryRunResult(null),
   })
 
   return (
@@ -386,6 +466,43 @@ export default function Services() {
                 callable as <span className="text-dim">model: {routeForm.match_model || '<name>'}</span>
               </span>
             </div>
+          </div>
+        )}
+
+        {hasProfiles && (routes.data ?? []).length > 0 && (
+          <div className="bg-elev/40 border border-rule px-5 py-4 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="label whitespace-nowrap">dry-run</div>
+              <input
+                className="field font-mono w-full text-[12px]"
+                placeholder="model name to test (e.g. chat)"
+                value={dryRunModel}
+                onChange={e => setDryRunModel(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && dryRunModel.trim()) {
+                    dryRun.mutate(dryRunModel.trim())
+                  }
+                }}
+              />
+              <button
+                className="btn"
+                disabled={!dryRunModel.trim() || dryRun.isPending}
+                onClick={() => dryRun.mutate(dryRunModel.trim())}
+              >
+                {dryRun.isPending ? 'testing…' : 'test'}
+              </button>
+              {dryRunResult && (
+                <button
+                  className="text-mute text-[11px] tracking-wider hover:text-dim transition-colors whitespace-nowrap"
+                  onClick={() => { setDryRunResult(null); setDryRunModel('') }}
+                >
+                  clear
+                </button>
+              )}
+            </div>
+            {dryRunResult && (
+              <DryRunResult result={dryRunResult} />
+            )}
           </div>
         )}
 
