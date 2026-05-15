@@ -19,6 +19,57 @@ export async function eventSourceUrl(path: string): Promise<string> {
   return `${path}${sep}stream_token=${encodeURIComponent(ticket.token)}`
 }
 
+export type ServiceProfile = {
+  id: number
+  name: string
+  model_name: string
+  hf_repo: string
+  revision: string
+  backend: string
+  image_tag: string
+  gpu_ids: number[]
+  tensor_parallel: number
+  max_model_len: number
+  dtype: string
+  pinned: boolean
+  idle_timeout_s: number | null
+  target_concurrency: number | null
+  max_loras: number
+  max_lora_rank: number
+  extra_args: Record<string, string>
+}
+
+export type ServiceRoute = {
+  id: number
+  name: string
+  match_model: string
+  profile_name: string
+  fallback_profile_name: string | null
+  enabled: boolean
+  priority: number
+}
+
+export type CreateProfileBody = {
+  name: string
+  model_name: string
+  hf_repo: string
+  revision?: string
+  backend?: string
+  gpu_ids: number[]
+  max_model_len?: number
+  pinned?: boolean
+  target_concurrency?: number | null
+}
+
+export type CreateRouteBody = {
+  name: string
+  match_model: string
+  profile_name: string
+  fallback_profile_name?: string | null
+  enabled?: boolean
+  priority?: number
+}
+
 async function jfetch<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const token = getToken()
@@ -71,4 +122,19 @@ export const api = {
   // Predictor endpoints.
   predictorCandidates: () => jfetch<any[]>('GET', '/admin/predictor/candidates'),
   predictorStats: () => jfetch<any>('GET', '/admin/predictor/stats'),
+
+  // Service profiles.
+  listProfiles: () => jfetch<ServiceProfile[]>('GET', '/admin/service-profiles'),
+  createProfile: (b: CreateProfileBody) =>
+    jfetch<ServiceProfile>('POST', '/admin/service-profiles', b),
+  deployProfile: (name: string) =>
+    jfetch<any>('POST', `/admin/service-profiles/${encodeURIComponent(name)}/deploy`),
+  deleteProfile: (name: string) =>
+    jfetch<void>('DELETE', `/admin/service-profiles/${encodeURIComponent(name)}`),
+
+  // Service routes.
+  listRoutes: () => jfetch<ServiceRoute[]>('GET', '/admin/routes'),
+  createRoute: (b: CreateRouteBody) => jfetch<ServiceRoute>('POST', '/admin/routes', b),
+  deleteRoute: (name: string) =>
+    jfetch<void>('DELETE', `/admin/routes/${encodeURIComponent(name)}`),
 }
