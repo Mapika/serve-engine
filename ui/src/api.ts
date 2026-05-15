@@ -153,6 +153,33 @@ export const api = {
       'GET',
       `/admin/keys/${keyId}/usage?window_s=${windowS}&bucket_s=${bucketS}`,
     ),
+
+  // Request inspector.
+  listRequests: () => jfetch<RequestTrace[]>('GET', '/admin/requests'),
+}
+
+export type RequestTrace = {
+  request_id: string
+  method: string
+  path: string
+  model_requested: string | null
+  api_key_id: number | null
+  api_key_name: string | null
+  arrived_at: number
+  route_resolved_at: number | null
+  dispatched_at: number | null
+  first_byte_at: number | null
+  completed_at: number | null
+  route_name: string | null
+  profile_name: string | null
+  target_model: string | null
+  deployment_id: number | null
+  backend: string | null
+  cold_loaded: boolean
+  status_code: number | null
+  error: string | null
+  tokens_in: number
+  tokens_out: number
 }
 
 export type KeyUsageBucket = {

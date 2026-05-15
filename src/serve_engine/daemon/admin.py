@@ -40,7 +40,7 @@ def _is_stream_ticket_request(request: Request) -> bool:
     if request.method != "GET":
         return False
     path = request.url.path
-    return path == "/admin/events" or (
+    return path in ("/admin/events", "/admin/requests/stream") or (
         path.startswith("/admin/deployments/")
         and path.endswith("/logs/stream")
     )
@@ -427,6 +427,44 @@ def delete_service_route(
     if route is None:
         raise HTTPException(404, f"service route {name!r} not found")
     route_store.delete(conn, route.id)
+
+
+@router.get("/requests")
+def list_requests(request: Request):
+    """Snapshot of the in-memory request tracer ring buffer. Newest last."""
+    return request.app.state.request_tracer.snapshot()
+
+
+@router.get("/requests/stream")
+async def stream_requests(request: Request) -> StreamingResponse:
+    """SSE stream of request trace events (started / updated / completed)."""
+    if request.scope.get("type") != "http":
+        raise HTTPException(400, "http only")
+    tracer = request.app.state.request_tracer
+    sub = tracer.subscribe()
+
+    async def gen():
+        # Replay the current snapshot first so a fresh client sees the
+        # backlog without waiting for new traffic.
+        snap = tracer.snapshot()
+        yield f"event: snapshot\ndata: {_json.dumps(snap)}\n\n".encode()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    msg = await asyncio.wait_for(sub.queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield b": keep-alive\n\n"
+                    continue
+                yield (
+                    f"event: {msg['event']}\n"
+                    f"data: {_json.dumps(msg.get('trace', {}))}\n\n"
+                ).encode()
+        finally:
+            tracer.unsubscribe(sub)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @router.get("/routes/match/dry-run")

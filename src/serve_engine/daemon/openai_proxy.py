@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -42,6 +43,10 @@ async def _proxy(
 ) -> StreamingResponse:
     conn: sqlite3.Connection = request.app.state.conn
     backends: dict[str, Backend] = request.app.state.backends
+    tracer = request.app.state.request_tracer
+    trace = tracer.start(method=request.method, path=request.url.path)
+    if key is not None:
+        tracer.update(trace, api_key_id=key.id, api_key_name=key.name)
 
     body = await request.body()
     model_name: str | None = None
@@ -53,7 +58,9 @@ async def _proxy(
         pass
 
     if not model_name:
+        tracer.finalize(trace, status_code=400, error="missing model")
         raise HTTPException(400, detail="request body must include 'model'")
+    tracer.update(trace, model_requested=model_name)
 
     # Optional per-key model allowlist (migration 013).
     # - key is None: UDS request or no-keys-registered bypass; skip the check.
@@ -65,6 +72,7 @@ async def _proxy(
     # otherwise a route alias would silently bypass the allowlist.
     if key is not None and key.allowed_models is not None:
         if model_name not in key.allowed_models:
+            tracer.finalize(trace, status_code=403, error="model not in key allowlist")
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
                 detail=(
@@ -79,6 +87,13 @@ async def _proxy(
         candidate_model_names = [route.target_model_name]
         if route.fallback_model_name is not None:
             candidate_model_names.append(route.fallback_model_name)
+    tracer.update(
+        trace,
+        route_resolved_at=time.monotonic(),
+        route_name=route.name if route else None,
+        profile_name=route.profile_name if route else None,
+        target_model=route.target_model_name if route else None,
+    )
 
     # Resolve `model` to (base, optional adapter). Bare base names route
     # exactly as v1 did. Adapter names cause us to (a) pick a deployment
@@ -108,6 +123,7 @@ async def _proxy(
 
     if target is None:
         if route is not None:
+            tracer.finalize(trace, status_code=503, error="route has no ready service")
             raise HTTPException(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=(
@@ -116,16 +132,16 @@ async def _proxy(
                 ),
             )
         if unknown_error is not None:
+            tracer.finalize(trace, status_code=404, error=str(unknown_error))
             raise HTTPException(404, detail=str(unknown_error)) from unknown_error
         try:
             target = resolve_target(conn, requested_model_name)
         except UnknownModel as e:
+            tracer.finalize(trace, status_code=404, error=str(e))
             raise HTTPException(404, detail=str(e)) from e
         active = find_deployment_for(conn, target.base_model_name, target.adapter_name)
 
     if active is None or active.container_address is None:
-        # Differentiate: no deployment at all vs adapter requested but no
-        # LoRA-enabled deployment available.
         if target.adapter_name:
             detail = (
                 f"no ready deployment of base {target.base_model_name!r} "
@@ -133,10 +149,13 @@ async def _proxy(
             )
         else:
             detail = f"no ready deployment for model {requested_model_name!r}"
+        tracer.finalize(trace, status_code=503, error=detail)
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
 
+    tracer.update(trace, deployment_id=active.id, backend=active.backend)
     backend = backends.get(active.backend)
     if backend is None:
+        tracer.finalize(trace, status_code=500, error=f"unknown backend {active.backend!r}")
         raise HTTPException(500, detail=f"unknown backend {active.backend!r}")
 
     # If adapter requested, ensure it's loaded into the chosen deployment.
@@ -152,9 +171,12 @@ async def _proxy(
                     models_dir=manager._models_dir,
                 )
             except UnknownModel as e:
+                tracer.finalize(trace, status_code=404, error=str(e))
                 raise HTTPException(404, detail=str(e)) from e
             except RuntimeError as e:
+                tracer.finalize(trace, status_code=502, error=f"adapter load failed: {e}")
                 raise HTTPException(502, detail=f"adapter load failed: {e}") from e
+    tracer.update(trace, cold_loaded=cold_loaded)
 
     dep_store.touch_last_request(conn, active.id)
     request.app.state.request_count += 1
@@ -191,6 +213,7 @@ async def _proxy(
     headers.pop("authorization", None)
     headers.pop("Authorization", None)
 
+    tracer.update(trace, dispatched_at=time.monotonic())
     # Open the upstream stream BEFORE returning so we can read its status
     # and headers and forward them faithfully to the caller.
     client = make_engine_client(base)
@@ -210,19 +233,18 @@ async def _proxy(
     usage_tracker = _UsageTracker(is_sse="event-stream" in upstream_ct)
 
     async def streamer():
+        first_byte_seen = False
         try:
             async for chunk in resp.aiter_raw():
+                if not first_byte_seen:
+                    first_byte_seen = True
+                    tracer.update(trace, first_byte_at=time.monotonic())
                 usage_tracker.feed(chunk)
                 yield chunk
         finally:
             await stream_cm.__aexit__(None, None, None)
             await client.aclose()
             tin, tout = usage_tracker.extract()
-            # Patch the usage_events row inserted at dispatch so the
-            # predictor (and any future quota/billing) sees real
-            # token counts. Skipped only when extraction yielded 0/0 from
-            # a missing/incomplete usage block, where overwriting buys
-            # nothing.
             if tin or tout:
                 _usage_events_store.set_tokens(
                     conn, usage_event_id, tokens_in=tin, tokens_out=tout,
@@ -231,6 +253,12 @@ async def _proxy(
                 _key_usage_store.set_tokens(
                     conn, key.usage_event_id, tokens_in=tin, tokens_out=tout,
                 )
+            tracer.finalize(
+                trace,
+                status_code=resp.status_code,
+                tokens_in=tin,
+                tokens_out=tout,
+            )
 
     return StreamingResponse(
         streamer(),

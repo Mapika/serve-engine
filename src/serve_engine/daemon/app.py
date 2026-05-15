@@ -4,6 +4,7 @@ import logging
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 
@@ -30,6 +31,7 @@ def _attach_state(
     manager: LifecycleManager,
     event_bus: EventBus,
     stream_tokens: StreamTokenStore,
+    request_tracer: Any,
 ) -> None:
     app.state.conn = conn
     app.state.backends = backends
@@ -38,6 +40,7 @@ def _attach_state(
     app.state.stream_tokens = stream_tokens
     app.state.tier_cfg = load_tiers()
     app.state.request_count = 0
+    app.state.request_tracer = request_tracer
 
     @app.get("/healthz")
     def healthz():
@@ -62,6 +65,8 @@ def build_apps(
     """
     event_bus = EventBus()
     stream_tokens = StreamTokenStore()
+    from serve_engine.daemon.request_tracer import RequestTracer
+    request_tracer = RequestTracer()
     manager = LifecycleManager(
         conn=conn,
         docker_client=docker_client,
@@ -133,6 +138,7 @@ def build_apps(
         manager=manager,
         event_bus=event_bus,
         stream_tokens=stream_tokens,
+        request_tracer=request_tracer,
     )
     tcp_app.state.predictor_task = predictor_task
     tcp_app.include_router(openai_router)
@@ -148,6 +154,7 @@ def build_apps(
         manager=manager,
         event_bus=event_bus,
         stream_tokens=stream_tokens,
+        request_tracer=request_tracer,
     )
     uds_app.state.predictor_task = predictor_task
     uds_app.include_router(openai_router)
