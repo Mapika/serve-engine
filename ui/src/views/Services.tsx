@@ -44,6 +44,25 @@ export default function Services() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['routes'] }),
   })
 
+  const [profileActionError, setProfileActionError] = useState('')
+
+  const deployProfile = useMutation({
+    mutationFn: (name: string) => api.deployProfile(name),
+    onMutate: () => setProfileActionError(''),
+    onError: (e: Error) => setProfileActionError(e.message),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['deps'] }),
+  })
+
+  const deleteProfile = useMutation({
+    mutationFn: (name: string) => api.deleteProfile(name),
+    onMutate: () => setProfileActionError(''),
+    onError: (e: Error) => setProfileActionError(e.message),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['profiles'] })
+      qc.invalidateQueries({ queryKey: ['routes'] })
+    },
+  })
+
   return (
     <div className="space-y-14">
       <header className="flex items-baseline justify-between">
@@ -191,7 +210,67 @@ export default function Services() {
 
       <section className="space-y-4">
         <div className="label">profiles</div>
-        <div className="text-mute text-[12px]">coming next step</div>
+        {profileActionError && (
+          <div className="text-err text-[11px] tracking-wider">{profileActionError}</div>
+        )}
+        <table className="ditable">
+          <thead>
+            <tr>
+              <th>name</th>
+              <th>model</th>
+              <th>backend</th>
+              <th className="text-right">gpus</th>
+              <th className="text-right">ctx</th>
+              <th>pinned</th>
+              <th className="text-right">actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(profiles.data ?? []).length === 0 && (
+              <tr>
+                <td colSpan={7} className="!py-12 text-center text-mute">
+                  no profiles. create one with the form below.
+                </td>
+              </tr>
+            )}
+            {(profiles.data ?? []).map(p => {
+              const isDeploying = deployProfile.isPending && deployProfile.variables === p.name
+              const isDeleting = deleteProfile.isPending && deleteProfile.variables === p.name
+              return (
+                <tr key={p.id}>
+                  <td>{p.name}</td>
+                  <td className="text-dim">{p.model_name}</td>
+                  <td className="text-dim">{p.backend}</td>
+                  <td className="text-right text-dim tnum">{p.gpu_ids.join(',') || '—'}</td>
+                  <td className="text-right tnum">{p.max_model_len}</td>
+                  <td>
+                    {p.pinned
+                      ? <span className="text-accent">yes</span>
+                      : <span className="text-mute">no</span>}
+                  </td>
+                  <td className="text-right space-x-5 whitespace-nowrap">
+                    <button
+                      className="text-accent hover:opacity-70 transition-opacity disabled:opacity-40"
+                      disabled={isDeploying}
+                      onClick={() => deployProfile.mutate(p.name)}
+                    >
+                      {isDeploying ? 'deploying…' : 'deploy'}
+                    </button>
+                    <button
+                      className="btn-link-danger disabled:opacity-40"
+                      disabled={isDeleting}
+                      onClick={() => {
+                        if (confirm(`delete profile ${p.name}?`)) deleteProfile.mutate(p.name)
+                      }}
+                    >
+                      {isDeleting ? 'deleting…' : 'delete'}
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </section>
     </div>
   )
